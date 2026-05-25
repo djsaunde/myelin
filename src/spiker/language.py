@@ -54,6 +54,30 @@ class CharacterVocabulary:
 
 
 @dataclass(frozen=True)
+class ByteVocabulary:
+    """Fixed byte-level vocabulary for arbitrary UTF-8 text corpora."""
+
+    @classmethod
+    def from_text(cls, text: str) -> ByteVocabulary:
+        if not text:
+            raise ValueError("text must not be empty")
+        return cls()
+
+    @property
+    def size(self) -> int:
+        return 256
+
+    def encode(self, text: str) -> torch.Tensor:
+        if not text:
+            raise ValueError("text must not be empty")
+        return torch.tensor(list(text.encode("utf-8")), dtype=torch.long)
+
+    def decode(self, token_ids: torch.Tensor) -> str:
+        values = token_ids.detach().cpu().tolist()
+        return bytes(values).decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True)
 class LanguageEval:
     """Evaluation metrics for autoregressive character language modeling."""
 

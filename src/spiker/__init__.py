@@ -119,6 +119,7 @@ from spiker.kernels import (
     surrogate_lif_forward,
 )
 from spiker.language import (
+    ByteVocabulary,
     CharacterVocabulary,
     LanguageEval,
     SpikeChannelMix,
@@ -207,6 +208,7 @@ __all__ = [
     "ALIFState",
     "ALIFCell",
     "BITS_PER_WORD",
+    "ByteVocabulary",
     "CharacterVocabulary",
     "CheckpointPolicy",
     "CheckpointSize",

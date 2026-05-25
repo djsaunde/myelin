@@ -18,6 +18,7 @@ from example_utils import (
 )
 
 from spiker import (
+    ByteVocabulary,
     CharacterVocabulary,
     SpikeGPTConfig,
     SpikeLanguageModel,
@@ -37,6 +38,12 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--text", default=DEFAULT_TEXT)
     parser.add_argument("--text-file", type=Path)
+    parser.add_argument(
+        "--vocab",
+        choices=("char", "byte"),
+        default="char",
+        help="tokenization mode; byte uses a fixed 256-token UTF-8 vocabulary",
+    )
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--min-val-tokens", type=int, default=64)
     parser.add_argument("--context-length", type=int, default=32)
@@ -73,7 +80,11 @@ def main() -> None:
     torch.manual_seed(args.seed)
     configure_matmul_precision(args.matmul_precision)
     text = args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
-    vocabulary = CharacterVocabulary.from_text(text)
+    vocabulary = (
+        CharacterVocabulary.from_text(text)
+        if args.vocab == "char"
+        else ByteVocabulary.from_text(text)
+    )
     tokens = vocabulary.encode(text)
     train_tokens, val_tokens = split_token_sequence(
         tokens,
@@ -94,6 +105,7 @@ def main() -> None:
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
+        f"vocab:{args.vocab},"
         f"context_length:{args.context_length},layers:{args.layers},embedding:{args.embedding},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"

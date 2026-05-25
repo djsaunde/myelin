@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from spiker import (
+    ByteVocabulary,
     CharacterVocabulary,
     SpikeGPTConfig,
     SpikeLanguageModel,
@@ -49,6 +50,17 @@ def test_character_vocabulary_round_trips_and_rejects_unknown_chars() -> None:
     assert vocab.decode(encoded) == "nab"
     with pytest.raises(ValueError, match="out-of-vocabulary"):
         vocab.encode("band")
+
+
+def test_byte_vocabulary_round_trips_utf8_and_has_fixed_size() -> None:
+    text = "spike \u03bb"
+    vocab = ByteVocabulary.from_text(text)
+    encoded = vocab.encode(text)
+
+    assert vocab.size == 256
+    assert encoded.dtype == torch.long
+    assert encoded.max() < vocab.size
+    assert vocab.decode(encoded) == text
 
 
 def test_split_token_sequence_and_sample_batch() -> None:
