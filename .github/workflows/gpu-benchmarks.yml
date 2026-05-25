@@ -1,0 +1,73 @@
+name: GPU Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Benchmark preset to run.
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - core
+      suffix:
+        description: Artifact filename suffix.
+        required: true
+        default: self_hosted
+        type: string
+      runner-label:
+        description: Self-hosted runner label with CUDA and NVIDIA drivers.
+        required: true
+        default: cuda
+        type: string
+
+jobs:
+  gpu-benchmarks:
+    name: CUDA benchmark preset
+    runs-on: [self-hosted, linux, "${{ inputs.runner-label }}"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra cuda --extra bench
+
+      - name: Print GPU environment
+        run: |
+          nvidia-smi
+          uv run python - <<'PY'
+          import torch
+          print("torch", torch.__version__)
+          print("cuda_available", torch.cuda.is_available())
+          print("cuda_version", torch.version.cuda)
+          if torch.cuda.is_available():
+              print("gpu", torch.cuda.get_device_name())
+          PY
+
+      - name: Run benchmark preset
+        run: |
+          uv run python -m spiker.benchmarks.runner \
+            --preset "${{ inputs.preset }}" \
+            --device cuda \
+            --require-cuda \
+            --suffix "${{ inputs.suffix }}" \
+            --output-dir benchmark-artifacts
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spiker-gpu-benchmarks-${{ inputs.preset }}-${{ inputs.suffix }}
+          path: benchmark-artifacts/*.md
+          if-no-files-found: error

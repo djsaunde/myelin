@@ -1,0 +1,60 @@
+{
+  "core_count": 4,
+  "cores": [
+    {
+      "core_id": 0,
+      "input_count": 4,
+      "input_end": 4,
+      "input_start": 0,
+      "output_count": 6,
+      "output_end": 6,
+      "output_start": 0,
+      "requires_accumulator": true,
+      "synapse_count": 24
+    },
+    {
+      "core_id": 1,
+      "input_count": 4,
+      "input_end": 8,
+      "input_start": 4,
+      "output_count": 6,
+      "output_end": 6,
+      "output_start": 0,
+      "requires_accumulator": true,
+      "synapse_count": 24
+    },
+    {
+      "core_id": 2,
+      "input_count": 4,
+      "input_end": 4,
+      "input_start": 0,
+      "output_count": 6,
+      "output_end": 12,
+      "output_start": 6,
+      "requires_accumulator": true,
+      "synapse_count": 24
+    },
+    {
+      "core_id": 3,
+      "input_count": 4,
+      "input_end": 8,
+      "input_start": 4,
+      "output_count": 6,
+      "output_end": 12,
+      "output_start": 6,
+      "requires_accumulator": true,
+      "synapse_count": 24
+    }
+  ],
+  "format": "spiker.dense_lif_placement.v0",
+  "input_size": 8,
+  "max_inputs_per_core": 4,
+  "max_outputs_per_core": 6,
+  "metadata": {
+    "example": "export_hardware_bundle"
+  },
+  "output_size": 12,
+  "source_format": "spiker.dense_lif_quantized.v0",
+  "target": "generic",
+  "total_synapse_count": 96
+}
