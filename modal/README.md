@@ -7,6 +7,11 @@ The default GPU target is `L4:2`, which is intentionally cheaper than H100/B200
 and enough for smoke testing our DDP/FSDP2 wiring. Increase the GPU class later
 only when a benchmark needs it.
 
+The Modal smoke launcher defaults to `--compile off`. That keeps cloud smoke
+runs focused on distributed correctness and avoids spending most of the run on
+first-step compilation. Use the local examples directly when benchmarking the
+compiled CUDA path.
+
 ## Setup
 
 Install the optional Modal dependency and authenticate:

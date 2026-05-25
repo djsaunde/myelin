@@ -7,7 +7,7 @@ import os
 import time
 from collections.abc import Sized
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import torch
 import torch.distributed as dist
@@ -82,6 +82,32 @@ def reduced_sums(values: torch.Tensor, distributed: bool) -> torch.Tensor:
     if distributed:
         dist.all_reduce(values, op=dist.ReduceOp.SUM)
     return values
+
+
+def prepare_mnist_datasets(
+    data_dir: str,
+    *,
+    transform: Any,
+    train_limit: int | None,
+    test_limit: int | None,
+    distributed: bool,
+    rank: int,
+) -> tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
+    path = Path(data_dir)
+    if distributed and rank != 0:
+        dist.barrier()
+    download = not distributed or rank == 0
+    train_data = limited_dataset(
+        datasets.MNIST(path, train=True, download=download, transform=transform),
+        train_limit,
+    )
+    test_data = limited_dataset(
+        datasets.MNIST(path, train=False, download=download, transform=transform),
+        test_limit,
+    )
+    if distributed and rank == 0:
+        dist.barrier()
+    return train_data, test_data
 
 
 def apply_fsdp2(model: nn.Module, *, device: str, distributed: bool) -> nn.Module:
@@ -172,13 +198,13 @@ def main() -> None:
         torch.manual_seed(args.seed + rank)
 
         transform = transforms.ToTensor()
-        train_data = limited_dataset(
-            datasets.MNIST(Path(args.data_dir), train=True, download=True, transform=transform),
-            args.train_limit,
-        )
-        test_data = limited_dataset(
-            datasets.MNIST(Path(args.data_dir), train=False, download=True, transform=transform),
-            args.test_limit,
+        train_data, test_data = prepare_mnist_datasets(
+            args.data_dir,
+            transform=transform,
+            train_limit=args.train_limit,
+            test_limit=args.test_limit,
+            distributed=distributed,
+            rank=rank,
         )
         train_sampler = (
             DistributedSampler(

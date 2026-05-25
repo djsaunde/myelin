@@ -29,7 +29,7 @@ class TrainConfig:
     log_every: int = 100
     eval_every: int = 250
     backend: str = "auto"
-    compile_policy: str = "auto"
+    compile_policy: str = "off"
     matmul_precision: str = "high"
     wandb: bool = False
     wandb_project: str = "spiker"
