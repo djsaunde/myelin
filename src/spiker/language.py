@@ -15,6 +15,7 @@ from typing import Literal, cast
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 
 from spiker.surrogates import SurrogateFn, atan_surrogate, hard_surrogate_spike
 
@@ -143,6 +144,7 @@ class SpikeGPTConfig:
     lif_reset: float = 0.0
     surrogate_slope: float = 2.0
     spike_embedding: bool = True
+    gradient_checkpointing: bool = False
 
     def validate(self) -> None:
         if self.vocab_size <= 0:
@@ -705,6 +707,7 @@ class SpikeLanguageModel(nn.Module):
         )
         self.ln_out = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.gradient_checkpointing = config.gradient_checkpointing
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module) -> None:
@@ -723,6 +726,16 @@ class SpikeLanguageModel(nn.Module):
             self.config.surrogate_slope * embeddings,
             atan_surrogate,
         )
+
+    def set_gradient_checkpointing(self, enabled: bool = True) -> None:
+        """Enable or disable block-level activation checkpointing for training."""
+
+        self.gradient_checkpointing = enabled
+
+    def _run_block(self, block: nn.Module, hidden: torch.Tensor) -> torch.Tensor:
+        if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+            return cast(torch.Tensor, checkpoint(block, hidden, use_reentrant=False))
+        return cast(torch.Tensor, block(hidden))
 
     def initial_state(
         self,
@@ -781,7 +794,7 @@ class SpikeLanguageModel(nn.Module):
 
         hidden = self.embed_tokens(input_ids)
         for block in self.blocks:
-            hidden = block(hidden)
+            hidden = self._run_block(block, hidden)
         logits = self.head(self.ln_out(hidden))
 
         if targets is None:

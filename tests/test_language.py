@@ -123,6 +123,39 @@ def test_spike_language_model_returns_logits_loss_and_spike_rates() -> None:
     assert "blocks.0.channel" in rates
 
 
+def test_spike_language_model_gradient_checkpointing_preserves_loss_and_gradients() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=11,
+        context_length=8,
+        n_layer=2,
+        n_embd=16,
+        dropout=0.0,
+        lif_threshold=0.0,
+    )
+    reference = SpikeLanguageModel(config)
+    checkpointed = SpikeLanguageModel(config)
+    checkpointed.load_state_dict(reference.state_dict())
+    checkpointed.set_gradient_checkpointing(True)
+    input_ids = torch.randint(0, config.vocab_size, (3, config.context_length))
+    targets = torch.randint(0, config.vocab_size, (3, config.context_length))
+
+    reference_loss, _reference_logits = reference(input_ids, targets)
+    checkpointed_loss, _checkpointed_logits = checkpointed(input_ids, targets)
+    reference_loss.backward()
+    checkpointed_loss.backward()
+
+    assert torch.allclose(reference_loss, checkpointed_loss)
+    for reference_parameter, checkpointed_parameter in zip(
+        reference.parameters(),
+        checkpointed.parameters(),
+        strict=True,
+    ):
+        assert reference_parameter.grad is not None
+        assert checkpointed_parameter.grad is not None
+        assert torch.allclose(reference_parameter.grad, checkpointed_parameter.grad)
+
+
 def test_spike_language_model_generate_extends_context_and_restores_training() -> None:
     torch.manual_seed(0)
     config = SpikeGPTConfig(

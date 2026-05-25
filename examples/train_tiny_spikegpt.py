@@ -73,6 +73,12 @@ def main() -> None:
         action="store_true",
         help="use ordinary dense token embeddings instead of hard surrogate binary embeddings",
     )
+    parser.add_argument(
+        "--activation-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="checkpoint SpikeGPT blocks during training to reduce saved activations",
+    )
     add_compile_policy_arg(parser)
     add_matmul_precision_arg(parser)
     args = parser.parse_args()
@@ -99,6 +105,7 @@ def main() -> None:
         dropout=args.dropout,
         lif_threshold=args.lif_threshold,
         spike_embedding=not args.dense_embedding,
+        gradient_checkpointing=args.activation_checkpointing,
     )
     compile_model = resolve_compile_policy(args.compile, args.device)
     raw_model = SpikeLanguageModel(config).to(device=args.device)
@@ -109,7 +116,9 @@ def main() -> None:
         f"context_length:{args.context_length},layers:{args.layers},embedding:{args.embedding},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"
-        f"spike_embedding:{not args.dense_embedding},vocab_size:{vocabulary.size},"
+        f"spike_embedding:{not args.dense_embedding},"
+        f"activation_checkpointing:{args.activation_checkpointing},"
+        f"vocab_size:{vocabulary.size},"
         f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()}",
         flush=True,
     )

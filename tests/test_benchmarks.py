@@ -1037,6 +1037,7 @@ def test_spikegpt_training_benchmark_smoke() -> None:
             repeats=1,
             seed=0,
             matmul_precision="high",
+            activation_checkpointing=False,
             compile=False,
         )
     )

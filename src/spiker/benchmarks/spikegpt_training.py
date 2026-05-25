@@ -76,6 +76,7 @@ def _benchmark_path(
     *,
     path: str,
     compile_model: bool,
+    activation_checkpointing: bool,
     inputs: torch.Tensor,
     targets: torch.Tensor,
     device: torch.device,
@@ -83,6 +84,7 @@ def _benchmark_path(
     try:
         torch.manual_seed(args.seed)
         raw_model = _make_model(args, device)
+        raw_model.set_gradient_checkpointing(activation_checkpointing)
         model: nn.Module = raw_model
         if compile_model:
             model = cast(
@@ -149,17 +151,31 @@ def run_benchmark(args: argparse.Namespace) -> list[TrainingResult]:
             args,
             path="eager",
             compile_model=False,
+            activation_checkpointing=False,
             inputs=inputs,
             targets=targets,
             device=device,
         )
     ]
+    if args.activation_checkpointing:
+        rows.append(
+            _benchmark_path(
+                args,
+                path="eager_activation_checkpointed",
+                compile_model=False,
+                activation_checkpointing=True,
+                inputs=inputs,
+                targets=targets,
+                device=device,
+            )
+        )
     if args.compile:
         rows.append(
             _benchmark_path(
                 args,
                 path="torch_compile_fullgraph",
                 compile_model=True,
+                activation_checkpointing=False,
                 inputs=inputs,
                 targets=targets,
                 device=device,
@@ -180,7 +196,8 @@ def print_markdown(args: argparse.Namespace, rows: list[TrainingResult]) -> None
     )
     print(
         f"Warmup: {args.warmup}; repeats: {args.repeats}; seed: {args.seed}; "
-        f"compile={args.compile}; matmul_precision={args.matmul_precision}"
+        f"compile={args.compile}; activation_checkpointing={args.activation_checkpointing}; "
+        f"matmul_precision={args.matmul_precision}"
     )
     print()
     print("| Path | Step time | Tokens/s | Peak memory | Loss | Error |")
@@ -215,6 +232,11 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--matmul-precision", choices=("highest", "high", "medium"), default="high")
+    parser.add_argument(
+        "--activation-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--compile", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
     print_markdown(args, run_benchmark(args))
