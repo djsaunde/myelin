@@ -118,6 +118,15 @@ from spiker.kernels import (
     surrogate_alif_forward,
     surrogate_lif_forward,
 )
+from spiker.language import (
+    SpikeChannelMix,
+    SpikeGPTBlock,
+    SpikeGPTConfig,
+    SpikeLanguageModel,
+    SpikeTimeMix,
+    SpikingSequenceLIF,
+    weighted_key_value,
+)
 from spiker.lava import LavaDenseLIFProcesses, build_lava_dense_lif_processes, lava_available
 from spiker.losses import SpikeRateLoss, spike_rate_loss
 from spiker.modules import (
@@ -233,7 +242,13 @@ __all__ = [
     "QuantizedDenseLIFHardwareExport",
     "SPINNAKER2_DENSE_LIF_EXPORT_FORMAT",
     "SpikeRateLoss",
+    "SpikeChannelMix",
+    "SpikeGPTBlock",
+    "SpikeGPTConfig",
+    "SpikeLanguageModel",
+    "SpikeTimeMix",
     "SpiNNaker2DenseLIFManifest",
+    "SpikingSequenceLIF",
     "SurrogateBuilder",
     "SurrogateDenseLIF",
     "SurrogateALIFCell",
@@ -337,6 +352,7 @@ __all__ = [
     "validate_generated_forward_ir",
     "validate_neuron_ir",
     "validate_surrogate_derivative_ir",
+    "weighted_key_value",
     "write_dense_lif_placement_plan",
     "write_hardware_export",
     "write_hardware_export_bundle",
