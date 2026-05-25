@@ -32,6 +32,18 @@ tests that do not need remote logging.
 uv run modal run modal/train_distributed.py --target ddp
 ```
 
+## DDP Conv MNIST
+
+```bash
+uv run modal run modal/train_distributed.py \
+  --target ddp-conv \
+  --timesteps 25 \
+  --hidden 256 \
+  --epochs 4 \
+  --train-limit 60000 \
+  --test-limit 10000
+```
+
 ## FSDP2 Smoke
 
 ```bash

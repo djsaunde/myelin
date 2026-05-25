@@ -1,4 +1,4 @@
-"""Train the rate-readout MNIST SNN with ordinary PyTorch DDP."""
+"""Train the convolutional MNIST SNN with ordinary PyTorch DDP."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import time
 from collections.abc import Sized
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -35,12 +35,8 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchvision import datasets, transforms
-from train_mnist import accuracy, limited_dataset, make_time_inputs, synchronize_if_needed
-from train_mnist_rate import resolve_backend
-
-from spiker import RateReadoutClassifier, parse_checkpoint_size, resolve_checkpoint_size
-
-RateBackend = Literal["auto", "torch", "triton", "triton_generated", "triton_compile"]
+from train_mnist import accuracy, limited_dataset, synchronize_if_needed
+from train_mnist_conv import ConvMNISTSNN, apply_synapse_init, make_image_series
 
 
 def env_int(name: str, default: int) -> int:
@@ -144,9 +140,9 @@ def evaluate_distributed(
     totals = torch.zeros(3, dtype=torch.float64, device=device)
 
     for batch_index, (images, targets) in enumerate(loader, start=1):
-        inputs = make_time_inputs(images, timesteps, device, encoding=encoding)
+        image_series = make_image_series(images, timesteps, device, encoding=encoding)
         targets = targets.to(device=device)
-        logits = model(inputs)
+        logits = model(image_series)
         loss = loss_fn(logits, targets)
         totals[0] += loss.detach().to(torch.float64) * targets.numel()
         totals[1] += (logits.argmax(dim=1) == targets).sum().to(torch.float64)
@@ -163,34 +159,25 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--timesteps", type=int, default=10)
+    parser.add_argument("--timesteps", type=int, default=25)
     add_encoding_arg(parser)
     parser.add_argument("--batch", type=int, default=128)
-    parser.add_argument("--hidden", type=int, default=128)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--hidden", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--label-smoothing", type=float, default=0.0)
-    add_grad_clip_arg(parser)
+    add_grad_clip_arg(parser, default=1.0)
     add_surrogate_args(parser)
-    parser.add_argument(
-        "--backend",
-        choices=("auto", "torch", "triton", "triton_generated", "triton_compile"),
-        default="auto",
-    )
-    parser.add_argument(
-        "--checkpoint-size",
-        type=parse_checkpoint_size,
-        default="balanced",
-    )
     parser.add_argument("--seed", type=int, default=0)
     add_compile_policy_arg(parser)
-    parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--eval-every", type=int, default=500)
+    parser.add_argument("--log-every", type=int, default=50)
+    parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument("--eval-batches", type=int, default=20)
     parser.add_argument("--train-limit", type=int)
     parser.add_argument("--test-limit", type=int)
     parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--synapse-init", choices=("spiker", "fan_in"), default="fan_in")
     add_matmul_precision_arg(parser)
     add_wandb_args(parser)
     args = parser.parse_args()
@@ -198,9 +185,7 @@ def main() -> None:
     configure_matmul_precision(args.matmul_precision)
     distributed, rank, local_rank, world_size, device = setup_distributed(args.device)
     try:
-        resolved_backend = resolve_backend(cast(RateBackend, args.backend), device)
         compile_model = resolve_compile_policy(args.compile, device)
-        resolved_checkpoint_size = resolve_checkpoint_size(args.timesteps, args.checkpoint_size)
         torch.manual_seed(args.seed + rank)
 
         transform = transforms.ToTensor()
@@ -271,14 +256,11 @@ def main() -> None:
             "matmul_precision": args.matmul_precision,
             "surrogate_slope": args.surrogate_slope,
             "hard_forward": not args.smooth_forward,
-            "backend": args.backend,
-            "resolved_backend": resolved_backend,
-            "checkpoint_size": args.checkpoint_size,
-            "resolved_checkpoint_size": resolved_checkpoint_size,
+            "synapse_init": args.synapse_init,
             "seed": args.seed,
             "train_examples": train_examples,
             "test_examples": test_examples,
-            "model": "rate_readout_mnist_snn",
+            "model": "conv_mnist_snn",
         }
         wandb_run = init_wandb(
             enabled=args.wandb and is_rank0(rank),
@@ -297,29 +279,25 @@ def main() -> None:
                 f"lr:{args.lr},dropout:{args.dropout},label_smoothing:{args.label_smoothing},"
                 f"grad_clip:{args.grad_clip},matmul_precision:{args.matmul_precision},"
                 f"surrogate_slope:{args.surrogate_slope},hard_forward:{not args.smooth_forward},"
-                f"backend:{args.backend},resolved_backend:{resolved_backend},"
-                f"checkpoint_size:{args.checkpoint_size},"
-                f"resolved_checkpoint_size:{resolved_checkpoint_size},"
+                f"synapse_init:{args.synapse_init},"
                 f"train_examples:{train_examples},test_examples:{test_examples}",
                 flush=True,
             )
             print()
 
-        model: nn.Module = RateReadoutClassifier(
-            in_features=28 * 28,
-            hidden_features=args.hidden,
-            out_features=10,
+        base_model = ConvMNISTSNN(
+            hidden=args.hidden,
+            classes=10,
             surrogate_slope=args.surrogate_slope,
             hard_forward=not args.smooth_forward,
-            backend=resolved_backend,
-            checkpoint_size=resolved_checkpoint_size,
             dropout=args.dropout,
         ).to(device=device)
+        apply_synapse_init(base_model, args.synapse_init)
         if is_rank0(rank):
-            print_model_summary(model)
+            print_model_summary(base_model)
             print()
 
-        model = compile_training_model(model, compile_model)
+        model: nn.Module = compile_training_model(base_model, compile_model)
         if distributed:
             if torch.device(device).type == "cuda":
                 model = DistributedDataParallel(model, device_ids=[local_rank])
@@ -343,16 +321,21 @@ def main() -> None:
                 train_sampler.set_epoch(epoch)
             for images, targets in train_loader:
                 global_step += 1
-                inputs = make_time_inputs(images, args.timesteps, device, encoding=args.encoding)
+                image_series = make_image_series(
+                    images,
+                    args.timesteps,
+                    device,
+                    encoding=args.encoding,
+                )
                 targets = targets.to(device=device)
 
                 synchronize_if_needed(device)
                 step_start = time.perf_counter()
                 optimizer.zero_grad()
-                logits = model(inputs)
+                logits = model(image_series)
                 loss = loss_fn(logits, targets)
                 loss.backward()
-                clip_gradients(model, args.grad_clip)
+                grad_norm = clip_gradients(model, args.grad_clip)
                 optimizer.step()
                 synchronize_if_needed(device)
                 step_seconds = time.perf_counter() - step_start
@@ -388,6 +371,8 @@ def main() -> None:
                         "train/accuracy": train_acc,
                         "train/step_ms": step_seconds * 1000,
                     }
+                    if grad_norm is not None:
+                        wandb_metrics["train/grad_norm"] = grad_norm
                     if evaluated_loss is not None and evaluated_acc is not None:
                         wandb_metrics.update(
                             {"val/loss": evaluated_loss, "val/accuracy": evaluated_acc}

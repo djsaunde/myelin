@@ -65,7 +65,15 @@ def setup_distributed(requested_device: str) -> tuple[bool, int, int, int, str]:
 
     distributed = world_size > 1
     if distributed:
-        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+        if torch.device(device).type == "cuda":
+            dist.init_process_group(
+                backend=backend,
+                rank=rank,
+                world_size=world_size,
+                device_id=torch.device(device),
+            )
+        else:
+            dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
     return distributed, rank, local_rank, world_size, device
 
 
@@ -84,6 +92,16 @@ def reduced_sums(values: torch.Tensor, distributed: bool) -> torch.Tensor:
     return values
 
 
+def distributed_barrier(distributed: bool, device: str) -> None:
+    if not distributed:
+        return
+    torch_device = torch.device(device)
+    if torch_device.type == "cuda":
+        dist.barrier(device_ids=[torch_device.index or 0])
+    else:
+        dist.barrier()
+
+
 def prepare_mnist_datasets(
     data_dir: str,
     *,
@@ -92,10 +110,11 @@ def prepare_mnist_datasets(
     test_limit: int | None,
     distributed: bool,
     rank: int,
+    device: str,
 ) -> tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
     path = Path(data_dir)
     if distributed and rank != 0:
-        dist.barrier()
+        distributed_barrier(distributed, device)
     download = not distributed or rank == 0
     train_data = limited_dataset(
         datasets.MNIST(path, train=True, download=download, transform=transform),
@@ -106,7 +125,7 @@ def prepare_mnist_datasets(
         test_limit,
     )
     if distributed and rank == 0:
-        dist.barrier()
+        distributed_barrier(distributed, device)
     return train_data, test_data
 
 
@@ -205,6 +224,7 @@ def main() -> None:
             test_limit=args.test_limit,
             distributed=distributed,
             rank=rank,
+            device=device,
         )
         train_sampler = (
             DistributedSampler(
