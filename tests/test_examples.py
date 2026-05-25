@@ -293,6 +293,7 @@ def test_tiny_spikegpt_example_runs_on_cpu() -> None:
 
     assert "vocab:byte" in result.stdout
     assert "weight_decay:0.01" in result.stdout
+    assert "compile_warmup:True" in result.stdout
     assert "Grad Norm" in result.stdout
     assert "sample=" in result.stdout
 

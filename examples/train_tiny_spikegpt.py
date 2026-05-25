@@ -72,6 +72,14 @@ def main() -> None:
     parser.add_argument("--log-every", type=int, default=10)
     parser.add_argument("--eval-every", type=int, default=25)
     parser.add_argument("--eval-batches", type=int, default=8)
+    parser.add_argument(
+        "--compile-warmup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "run and report one compiled training step before timed logging when compile is enabled"
+        ),
+    )
     parser.add_argument("--sample-prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
     parser.add_argument("--seed", type=int, default=0)
@@ -127,6 +135,7 @@ def main() -> None:
         f"weight_decay:{args.weight_decay},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"
         f"grad_clip:{args.grad_clip},"
+        f"compile_warmup:{args.compile_warmup},"
         f"spike_embedding:{not args.dense_embedding},"
         f"activation_checkpointing:{args.activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
@@ -158,6 +167,7 @@ def main() -> None:
             "dropout": args.dropout,
             "lif_threshold": args.lif_threshold,
             "grad_clip": args.grad_clip,
+            "compile_warmup": args.compile_warmup,
             "spike_embedding": not args.dense_embedding,
             "activation_checkpointing": args.activation_checkpointing,
             "vocab_size": vocabulary.size,
@@ -176,6 +186,43 @@ def main() -> None:
 
     try:
         model.train()
+        torch_device = torch.device(args.device)
+        if compile_model and args.compile_warmup:
+            warmup_inputs, warmup_targets = sample_token_batch(
+                train_tokens,
+                batch_size=args.batch,
+                context_length=args.context_length,
+                device=args.device,
+            )
+            if torch_device.type == "cuda":
+                torch.cuda.synchronize(torch_device)
+            start = time.perf_counter()
+            optimizer.zero_grad(set_to_none=True)
+            warmup_loss, _warmup_logits = model(warmup_inputs, warmup_targets)
+            warmup_loss.backward()
+            warmup_grad_norm = clip_gradients(model, args.grad_clip)
+            optimizer.step()
+            if torch_device.type == "cuda":
+                torch.cuda.synchronize(torch_device)
+            warmup_seconds = time.perf_counter() - start
+            print(f"compile_warmup_step_ms={warmup_seconds * 1000:.3f}", flush=True)
+            print(f"compile_warmup_loss={float(warmup_loss.detach()):.6f}", flush=True)
+            if warmup_grad_norm is not None:
+                print(f"compile_warmup_grad_norm={warmup_grad_norm:.4f}", flush=True)
+            log_wandb(
+                wandb_run,
+                {
+                    "compile/warmup_step_ms": warmup_seconds * 1000,
+                    "compile/warmup_loss": float(warmup_loss.detach()),
+                    **(
+                        {}
+                        if warmup_grad_norm is None
+                        else {"compile/warmup_grad_norm": warmup_grad_norm}
+                    ),
+                },
+                step=0,
+            )
+
         for step in range(1, args.steps + 1):
             inputs, targets = sample_token_batch(
                 train_tokens,
@@ -183,7 +230,6 @@ def main() -> None:
                 context_length=args.context_length,
                 device=args.device,
             )
-            torch_device = torch.device(args.device)
             if torch_device.type == "cuda":
                 torch.cuda.synchronize(torch_device)
             start = time.perf_counter()
