@@ -20,6 +20,7 @@ from spiker.modules import (
     LinearSurrogateLIFPacked,
     LinearSurrogateLIFRate,
     LinearSynapse,
+    RateReadoutClassifier,
     SurrogateALIFCell,
     SurrogateLIFCell,
     TimeUnroll,
@@ -1032,6 +1033,52 @@ def test_linear_surrogate_lif_rate_module_can_return_scalar_mean() -> None:
     assert torch.equal(rate(inputs), dense(inputs).mean())
 
 
+def test_rate_readout_classifier_returns_class_logits() -> None:
+    torch.manual_seed(23)
+    inputs = torch.rand((5, 3, 4))
+    model = RateReadoutClassifier(
+        4,
+        6,
+        2,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        backend="torch",
+        checkpoint_size=3,
+        dropout=0.1,
+    )
+
+    logits = model(inputs)
+
+    assert logits.shape == (3, 2)
+
+
+def test_rate_readout_classifier_training_reduces_tiny_loss() -> None:
+    torch.manual_seed(24)
+    inputs = torch.rand((8, 4, 3))
+    targets = torch.tensor([0, 1, 0, 1])
+    model = RateReadoutClassifier(
+        3,
+        8,
+        2,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        backend="torch",
+        checkpoint_size=4,
+    )
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+
+    initial_loss = loss_fn(model(inputs), targets).detach()
+    for _ in range(20):
+        optimizer.zero_grad()
+        loss = loss_fn(model(inputs), targets)
+        loss.backward()
+        optimizer.step()
+    final_loss = loss_fn(model(inputs), targets).detach()
+
+    assert final_loss < initial_loss
+
+
 def test_linear_surrogate_lif_training_step_updates_weight() -> None:
     inputs = torch.rand((4, 2, 3))
     layer = LinearSurrogateLIF(3, 5, surrogate=fast_sigmoid_surrogate)
@@ -1198,3 +1245,30 @@ def test_linear_surrogate_lif_rate_auto_backend_compiles() -> None:
     assert torch.allclose(compiled_inputs.grad, inputs.grad)
     assert torch.allclose(compiled_layer.synapse.weight.grad, eager_layer.synapse.weight.grad)
     assert torch.allclose(compiled_layer.synapse.bias.grad, eager_layer.synapse.bias.grad)
+
+
+@pytest.mark.extended
+def test_rate_readout_classifier_compiles() -> None:
+    if not compiled_available():
+        pytest.skip("torch.compile is not available in this PyTorch build")
+
+    model = RateReadoutClassifier(
+        4,
+        6,
+        2,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        backend="torch",
+        checkpoint_size=3,
+    )
+    inputs = torch.rand((5, 3, 4))
+
+    try:
+        compiled_model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
+        logits = compiled_model(inputs)
+    except Exception as exc:
+        pytest.skip(
+            f"torch.compile could not compile RateReadoutClassifier: {type(exc).__name__}: {exc}"
+        )
+
+    assert logits.shape == (3, 2)

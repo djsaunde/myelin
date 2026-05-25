@@ -69,6 +69,7 @@ __all__ = [
     "LinearLIF",
     "LinearOnlineALIF",
     "LinearOnlineLIF",
+    "RateReadoutClassifier",
     "LinearSurrogateLIF",
     "LinearSurrogateLIFPacked",
     "LinearSurrogateLIFRate",
@@ -842,6 +843,64 @@ class LinearSurrogateLIFRate(nn.Module):
             reduction=self.reduction,
         )
         return rates
+
+
+class RateReadoutClassifier(nn.Module):
+    """One-hidden-layer SNN classifier with a spike-rate output readout.
+
+    This captures the compile-friendly training pattern used by the MNIST rate
+    example: stream the dense hidden synapse through the hidden LIF layer, then
+    train against class logits returned by a rate readout instead of exposing a
+    dense output spike tensor.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        params: LIFParams | None = None,
+        *,
+        surrogate: SurrogateFn = fast_sigmoid_surrogate,
+        surrogate_slope: float = 5.0,
+        hard_forward: bool = True,
+        bias: bool = True,
+        backend: Backend = "torch",
+        checkpoint_size: CheckpointSize = 25,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        hidden_backend: Backend = "triton" if backend == "triton_compile" else backend
+        self.hidden = LinearSurrogateLIF(
+            in_features,
+            hidden_features,
+            params,
+            surrogate=surrogate,
+            surrogate_slope=surrogate_slope,
+            hard_forward=hard_forward,
+            bias=bias,
+            backend=hidden_backend,
+            stream_synapse=True,
+            checkpoint_size=checkpoint_size,
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.output = LinearSurrogateLIFRate(
+            hidden_features,
+            out_features,
+            params,
+            surrogate=surrogate,
+            surrogate_slope=surrogate_slope,
+            hard_forward=hard_forward,
+            bias=bias,
+            backend=backend,
+            checkpoint_size=checkpoint_size,
+            reduction="none",
+        )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        hidden_spikes = self.hidden(inputs)
+        hidden_spikes = self.dropout(hidden_spikes)
+        return self.output(hidden_spikes)
 
 
 class LinearSurrogateLIFPacked(nn.Module):

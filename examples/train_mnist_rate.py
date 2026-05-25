@@ -34,10 +34,7 @@ from torchvision import datasets, transforms
 from train_mnist import accuracy, limited_dataset, make_time_inputs, synchronize_if_needed
 
 from spiker import (
-    CheckpointSize,
-    LinearSurrogateLIF,
-    LinearSurrogateLIFRate,
-    fast_sigmoid_surrogate,
+    RateReadoutClassifier,
     parse_checkpoint_size,
     resolve_checkpoint_size,
 )
@@ -49,52 +46,6 @@ TRITON_COMPILE_NOTE = (
     "backend_note=triton_compile is experimental and memory-oriented; use it for "
     "longer-T rate-readout pressure, not as the default speed path"
 )
-
-
-class RateReadoutMNISTSNN(nn.Module):
-    """Dense hidden SNN followed by a checkpointed spike-rate output layer."""
-
-    def __init__(
-        self,
-        features: int,
-        hidden: int,
-        classes: int,
-        *,
-        surrogate_slope: float,
-        hard_forward: bool,
-        backend: RateBackend,
-        checkpoint_size: CheckpointSize,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        self.backend: RateBackend = backend
-        hidden_backend: RateBackend = "triton" if backend == "triton_compile" else backend
-        self.hidden = LinearSurrogateLIF(
-            features,
-            hidden,
-            surrogate=fast_sigmoid_surrogate,
-            surrogate_slope=surrogate_slope,
-            hard_forward=hard_forward,
-            backend=hidden_backend,
-            stream_synapse=True,
-            checkpoint_size=checkpoint_size,
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.output = LinearSurrogateLIFRate(
-            hidden,
-            classes,
-            surrogate=fast_sigmoid_surrogate,
-            surrogate_slope=surrogate_slope,
-            hard_forward=hard_forward,
-            backend=backend,
-            checkpoint_size=checkpoint_size,
-            reduction="none",
-        )
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        hidden_spikes = self.hidden(inputs)
-        hidden_spikes = self.dropout(hidden_spikes)
-        return self.output(hidden_spikes)
 
 
 @torch.no_grad()
@@ -266,10 +217,10 @@ def main() -> None:
     )
     print()
 
-    model = RateReadoutMNISTSNN(
-        features=28 * 28,
-        hidden=args.hidden,
-        classes=10,
+    model = RateReadoutClassifier(
+        in_features=28 * 28,
+        hidden_features=args.hidden,
+        out_features=10,
         surrogate_slope=args.surrogate_slope,
         hard_forward=not args.smooth_forward,
         backend=resolved_backend,
