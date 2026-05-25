@@ -173,6 +173,8 @@ class SpikeGPTConfig:
             raise ValueError("n_embd must be positive")
         if self.dropout < 0.0 or self.dropout >= 1.0:
             raise ValueError("dropout must be in [0, 1)")
+        if self.model_type not in ("rwkv", "rwkv-ffn-pre"):
+            raise ValueError("model_type must be 'rwkv' or 'rwkv-ffn-pre'")
         if self.lif_tau <= 0.0:
             raise ValueError("lif_tau must be positive")
 

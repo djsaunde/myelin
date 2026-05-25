@@ -129,6 +129,17 @@ def test_spikegpt_config_serialization_round_trips() -> None:
     assert restored == config
 
 
+def test_spikegpt_config_deserialization_rejects_unknown_model_type() -> None:
+    with pytest.raises(ValueError, match="model_type"):
+        spikegpt_config_from_dict(
+            {
+                "vocab_size": 8,
+                "context_length": 4,
+                "model_type": "attention",
+            }
+        )
+
+
 def test_split_token_sequence_and_sample_batch() -> None:
     tokens = torch.arange(20)
 
