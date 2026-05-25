@@ -58,7 +58,8 @@ def main() -> None:
         "config="
         f"device:{args.device},"
         f"context_length:{config.context_length},layers:{config.n_layer},"
-        f"embedding:{config.n_embd},vocab_size:{vocabulary.size},"
+        f"embedding:{config.n_embd},model_type:{config.model_type},"
+        f"vocab_size:{vocabulary.size},"
         f"use_cache:{args.use_cache}",
         flush=True,
     )
