@@ -49,6 +49,9 @@ def test_base_package_imports_without_cuda_extras() -> None:
     assert spiker.linear_surrogate_lif_packed_forward
     assert spiker.LinearSurrogateLIFPacked
     assert spiker.LinearSurrogateLIFRate
+    assert spiker.SpikeGPTModelType
+    assert spiker.SpikeGPTPreset
+    assert spiker.SamplingMode
     assert spiker.recommended_checkpoint_size(100) == 25
 
 
