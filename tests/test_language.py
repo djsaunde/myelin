@@ -438,6 +438,31 @@ def test_evaluate_language_model_reports_loss_bpc_and_restores_training() -> Non
     assert model.training
 
 
+def test_evaluate_language_model_restores_training_after_error() -> None:
+    model = SpikeLanguageModel(
+        SpikeGPTConfig(
+            vocab_size=8,
+            context_length=4,
+            n_layer=1,
+            n_embd=8,
+            dropout=0.0,
+        )
+    )
+    model.train()
+
+    with pytest.raises(ValueError, match="too short"):
+        evaluate_language_model(
+            model,
+            torch.arange(4),
+            batch_size=2,
+            context_length=4,
+            device="cpu",
+            batches=1,
+        )
+
+    assert model.training
+
+
 def test_evaluate_language_model_strided_is_deterministic_and_restores_training() -> None:
     torch.manual_seed(0)
     model = SpikeLanguageModel(

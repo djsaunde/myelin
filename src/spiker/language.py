@@ -391,21 +391,23 @@ def evaluate_language_model(
     total_loss = 0.0
     total_tokens = 0
     loss_fn = nn.CrossEntropyLoss(reduction="sum")
-    for _ in range(batches):
-        inputs, targets = sample_token_batch(
-            tokens,
-            batch_size=batch_size,
-            context_length=context_length,
-            device=device,
-        )
-        logits = model(inputs)
-        if not isinstance(logits, torch.Tensor):
-            raise RuntimeError("evaluate_language_model expected logits-only model output")
-        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
-        total_loss += float(loss)
-        total_tokens += targets.numel()
-    if was_training:
-        model.train()
+    try:
+        for _ in range(batches):
+            inputs, targets = sample_token_batch(
+                tokens,
+                batch_size=batch_size,
+                context_length=context_length,
+                device=device,
+            )
+            logits = model(inputs)
+            if not isinstance(logits, torch.Tensor):
+                raise RuntimeError("evaluate_language_model expected logits-only model output")
+            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+            total_loss += float(loss)
+            total_tokens += targets.numel()
+    finally:
+        if was_training:
+            model.train()
     mean_loss = total_loss / total_tokens
     return LanguageEval(
         loss=mean_loss,
