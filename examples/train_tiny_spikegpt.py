@@ -50,6 +50,13 @@ def vocabulary_name(vocabulary: LanguageVocabulary) -> str:
     return "char"
 
 
+def metadata_nonnegative_int(metadata: dict[str, object], key: str) -> int:
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -179,6 +186,10 @@ def main() -> None:
     )
     actual_vocab = vocabulary_name(vocabulary)
     actual_activation_checkpointing = raw_model.gradient_checkpointing
+    previous_steps = metadata_nonnegative_int(
+        checkpoint_metadata, "total_steps"
+    ) or metadata_nonnegative_int(checkpoint_metadata, "steps")
+    total_steps = previous_steps + args.steps
     compile_model = resolve_compile_policy(args.compile, args.device)
     print(
         "config="
@@ -195,6 +206,7 @@ def main() -> None:
         f"activation_checkpointing:{actual_activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
         f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()},"
+        f"previous_steps:{previous_steps},total_steps:{total_steps},"
         f"checkpoint_in:{'' if args.checkpoint_in is None else args.checkpoint_in}",
         flush=True,
     )
@@ -242,6 +254,8 @@ def main() -> None:
             "vocab_size": vocabulary.size,
             "train_tokens": train_tokens.numel(),
             "val_tokens": val_tokens.numel(),
+            "previous_steps": previous_steps,
+            "total_steps": total_steps,
             "checkpoint_in": "" if args.checkpoint_in is None else str(args.checkpoint_in),
             "optimizer_loaded": optimizer_loaded,
         },
@@ -295,6 +309,7 @@ def main() -> None:
             )
 
         for step in range(1, args.steps + 1):
+            global_step = previous_steps + step
             inputs, targets = sample_token_batch(
                 train_tokens,
                 batch_size=args.batch,
@@ -329,7 +344,7 @@ def main() -> None:
                         batches=args.eval_batches,
                     )
                 print(
-                    f"| {step} | {float(loss.detach()):.6f} | "
+                    f"| {global_step} | {float(loss.detach()):.6f} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.loss:.6f}'} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.bits_per_character:.4f}'} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.perplexity:.4f}'} | "
@@ -354,7 +369,7 @@ def main() -> None:
                             "val/perplexity": eval_metrics.perplexity,
                         }
                     )
-                log_wandb(wandb_run, wandb_metrics, step=step)
+                log_wandb(wandb_run, wandb_metrics, step=global_step)
     finally:
         finish_wandb(wandb_run)
 
@@ -370,6 +385,8 @@ def main() -> None:
                 "vocab": actual_vocab,
                 "preset": args.preset,
                 "steps": args.steps,
+                "previous_steps": previous_steps,
+                "total_steps": total_steps,
                 "batch": args.batch,
                 "lr": args.lr,
                 "weight_decay": args.weight_decay,

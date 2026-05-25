@@ -300,6 +300,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "vocab:byte" in result.stdout
     assert "weight_decay:0.01" in result.stdout
     assert "compile_warmup:True" in result.stdout
+    assert "previous_steps:0,total_steps:2" in result.stdout
     assert "Grad Norm" in result.stdout
     assert f"checkpoint={checkpoint_path}" in result.stdout
     assert "sample=" in result.stdout
@@ -348,6 +349,8 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "optimizer_loaded=True" in resumed.stdout
     assert "vocab:byte" in resumed.stdout
     assert "context_length:8,layers:1,embedding:8" in resumed.stdout
+    assert "previous_steps:2,total_steps:3" in resumed.stdout
+    assert "| 3 |" in resumed.stdout
 
     evaluated = subprocess.run(
         [
