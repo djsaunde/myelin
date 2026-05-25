@@ -7,7 +7,11 @@ from pathlib import Path
 
 import torch
 
-from spiker import evaluate_language_model, load_spike_language_checkpoint
+from spiker import (
+    evaluate_language_model,
+    evaluate_language_model_strided,
+    load_spike_language_checkpoint,
+)
 
 
 def main() -> None:
@@ -17,7 +21,13 @@ def main() -> None:
     parser.add_argument("--text")
     parser.add_argument("--text-file", type=Path)
     parser.add_argument("--eval-batches", type=int, default=8)
+    parser.add_argument("--eval-stride", type=int)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument(
+        "--random-eval",
+        action="store_true",
+        help="use random validation windows instead of deterministic strided windows",
+    )
     parser.add_argument("--prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -55,17 +65,30 @@ def main() -> None:
     if eval_text:
         eval_tokens = vocabulary.encode(eval_text)
         try:
-            metrics = evaluate_language_model(
-                model,
-                eval_tokens,
-                batch_size=args.batch,
-                context_length=config.context_length,
-                device=args.device,
-                batches=args.eval_batches,
-            )
+            if args.random_eval:
+                metrics = evaluate_language_model(
+                    model,
+                    eval_tokens,
+                    batch_size=args.batch,
+                    context_length=config.context_length,
+                    device=args.device,
+                    batches=args.eval_batches,
+                )
+                eval_mode = "random"
+            else:
+                metrics = evaluate_language_model_strided(
+                    model,
+                    eval_tokens,
+                    batch_size=args.batch,
+                    context_length=config.context_length,
+                    device=args.device,
+                    stride=args.eval_stride,
+                )
+                eval_mode = "strided"
         except ValueError as exc:
             print(f"eval_skipped={exc}", flush=True)
         else:
+            print(f"eval_mode={eval_mode}", flush=True)
             print("| Loss | BPC | PPL |", flush=True)
             print("|---:|---:|---:|", flush=True)
             print(

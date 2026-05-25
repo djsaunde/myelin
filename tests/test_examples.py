@@ -375,6 +375,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     )
 
     assert "use_cache:True" in evaluated.stdout
+    assert "eval_mode=strided" in evaluated.stdout
     assert "| Loss | BPC | PPL |" in evaluated.stdout
     assert "sample=" in evaluated.stdout
 

@@ -412,6 +412,62 @@ def evaluate_language_model(
     )
 
 
+@torch.no_grad()
+def evaluate_language_model_strided(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    context_length: int,
+    device: str | torch.device,
+    stride: int | None = None,
+) -> LanguageEval:
+    """Evaluate deterministic next-token windows over a corpus."""
+
+    if tokens.ndim != 1:
+        raise ValueError(f"tokens must be one-dimensional; got {tokens.shape}")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if context_length <= 0:
+        raise ValueError("context_length must be positive")
+    resolved_stride = context_length if stride is None else stride
+    if resolved_stride <= 0:
+        raise ValueError("stride must be positive")
+    starts = tuple(range(0, tokens.numel() - context_length, resolved_stride))
+    if not starts:
+        raise ValueError("tokens are too short for the requested context length")
+
+    was_training = model.training
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    loss_fn = nn.CrossEntropyLoss(reduction="sum")
+    try:
+        for offset in range(0, len(starts), batch_size):
+            batch_starts = starts[offset : offset + batch_size]
+            inputs = torch.stack(
+                [tokens[start : start + context_length] for start in batch_starts]
+            ).to(device=device)
+            targets = torch.stack(
+                [tokens[start + 1 : start + context_length + 1] for start in batch_starts]
+            ).to(device=device)
+            logits = model(inputs)
+            if not isinstance(logits, torch.Tensor):
+                raise RuntimeError("evaluate_language_model_strided expected logits-only output")
+            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+            total_loss += float(loss)
+            total_tokens += targets.numel()
+    finally:
+        if was_training:
+            model.train()
+    mean_loss = total_loss / total_tokens
+    return LanguageEval(
+        loss=mean_loss,
+        bits_per_character=mean_loss / 0.6931471805599453,
+        perplexity=float(torch.exp(torch.tensor(mean_loss))),
+    )
+
+
 class SpikingSequenceLIF(nn.Module):
     """LIF unroll over a batch-major token sequence ``[B, T, C]``."""
 

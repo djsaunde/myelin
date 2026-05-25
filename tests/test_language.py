@@ -13,6 +13,7 @@ from spiker import (
     SpikeLanguageModel,
     SpikingSequenceLIF,
     evaluate_language_model,
+    evaluate_language_model_strided,
     language_vocabulary_from_dict,
     language_vocabulary_to_dict,
     load_spike_language_checkpoint,
@@ -355,6 +356,43 @@ def test_evaluate_language_model_reports_loss_bpc_and_restores_training() -> Non
     assert metrics.loss > 0
     assert metrics.bits_per_character > 0
     assert metrics.perplexity > 1
+    assert model.training
+
+
+def test_evaluate_language_model_strided_is_deterministic_and_restores_training() -> None:
+    torch.manual_seed(0)
+    model = SpikeLanguageModel(
+        SpikeGPTConfig(
+            vocab_size=8,
+            context_length=4,
+            n_layer=1,
+            n_embd=8,
+            dropout=0.0,
+            lif_threshold=0.0,
+        )
+    )
+    model.train()
+    tokens = torch.arange(20) % 8
+
+    first = evaluate_language_model_strided(
+        model,
+        tokens,
+        batch_size=2,
+        context_length=4,
+        device="cpu",
+    )
+    second = evaluate_language_model_strided(
+        model,
+        tokens,
+        batch_size=3,
+        context_length=4,
+        device="cpu",
+    )
+
+    assert first.loss == pytest.approx(second.loss)
+    assert first.bits_per_character == pytest.approx(second.bits_per_character)
+    assert first.perplexity == pytest.approx(second.perplexity)
+    assert first.loss > 0
     assert model.training
 
 
