@@ -68,6 +68,7 @@ from spiker.benchmarks.snntorch_matrix import (
 from spiker.benchmarks.snntorch_matrix import (
     run_matrix as run_snntorch_matrix,
 )
+from spiker.benchmarks.spikegpt_generation import run_benchmark as run_spikegpt_generation
 from spiker.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
 from spiker.benchmarks.two_layer_recompute import (
     BenchRow as TwoLayerBenchRow,
@@ -981,6 +982,35 @@ def test_benchmark_runner_includes_hardware_export_without_device_arg(tmp_path) 
     assert len(runs) == 1
     assert "--device" not in runs[0].command
     assert runs[0].output_path == tmp_path / "hardware_export_smoke_unit.md"
+
+
+def test_benchmark_runner_includes_spikegpt_generation_specs() -> None:
+    assert "spikegpt_generation" in {spec.name for spec in PRESETS["smoke"]}
+    assert "spikegpt_generation" in {spec.name for spec in PRESETS["core"]}
+
+
+def test_spikegpt_generation_benchmark_smoke() -> None:
+    rows = run_spikegpt_generation(
+        argparse.Namespace(
+            device="cpu",
+            batch=1,
+            prompt_tokens=4,
+            new_tokens=2,
+            context_length=8,
+            layers=1,
+            embedding=8,
+            vocab_size=16,
+            lif_threshold=0.0,
+            dense_embedding=False,
+            warmup=0,
+            repeats=1,
+            seed=0,
+        )
+    )
+
+    assert [row.path for row in rows] == ["recompute_context", "cached_recurrent_state"]
+    assert rows[1].matches_reference
+    assert rows[1].tokens_per_second > 0
 
 
 def test_distributed_collectives_benchmark_smoke() -> None:
