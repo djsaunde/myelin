@@ -97,6 +97,57 @@ def test_mnist_rate_ddp_example_runs_on_cpu() -> None:
 
 
 @pytest.mark.extended
+def test_mnist_rate_fsdp2_example_runs_on_cpu() -> None:
+    example = Path(__file__).resolve().parents[1] / "examples" / "train_mnist_rate_fsdp2.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            "--nproc-per-node",
+            "2",
+            str(example),
+            "--device",
+            "cpu",
+            "--compile",
+            "off",
+            "--backend",
+            "torch",
+            "--timesteps",
+            "4",
+            "--batch",
+            "4",
+            "--hidden",
+            "8",
+            "--epochs",
+            "1",
+            "--train-limit",
+            "16",
+            "--test-limit",
+            "16",
+            "--eval-batches",
+            "1",
+            "--log-every",
+            "1",
+            "--eval-every",
+            "2",
+            "--num-workers",
+            "0",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "world_size:2" in result.stdout
+    assert "final_test_loss=" in result.stdout
+    assert "final_test_accuracy=" in result.stdout
+
+
+@pytest.mark.extended
 def test_custom_neuron_dsl_example_runs_on_cpu() -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "custom_neuron_dsl.py"
 
