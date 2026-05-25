@@ -19,6 +19,7 @@ from torch.nn import functional as F
 from spiker.surrogates import SurrogateFn, atan_surrogate, hard_surrogate_spike
 
 SpikeGPTModelType = Literal["rwkv", "rwkv-ffn-pre"]
+SamplingMode = Literal["multinomial", "greedy"]
 
 
 @dataclass(frozen=True)
@@ -346,6 +347,60 @@ class SpikeLanguageModel(nn.Module):
             return logits
         loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
         return loss, logits
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        *,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        sampling: SamplingMode = "multinomial",
+    ) -> torch.Tensor:
+        """Autoregressively extend ``input_ids``.
+
+        This simple reference path recomputes the context window on each token.
+        A state-cached RNN path is the intended future optimization once the
+        training architecture is stable.
+        """
+
+        if max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be non-negative")
+        if temperature <= 0.0:
+            raise ValueError("temperature must be positive")
+        if top_k is not None and top_k <= 0:
+            raise ValueError("top_k must be positive when provided")
+        if sampling not in ("multinomial", "greedy"):
+            raise ValueError("sampling must be 'multinomial' or 'greedy'")
+
+        output = input_ids
+        was_training = self.training
+        self.eval()
+        for _ in range(max_new_tokens):
+            context = output[:, -self.config.context_length :]
+            logits = self(context)
+            if not isinstance(logits, torch.Tensor):
+                raise RuntimeError("generate expected logits-only forward output")
+            next_logits = logits[:, -1] / temperature
+            if top_k is not None:
+                limit = min(top_k, next_logits.shape[-1])
+                values, _indices = torch.topk(next_logits, limit, dim=-1)
+                threshold = values[:, -1].unsqueeze(-1)
+                next_logits = torch.where(
+                    next_logits < threshold,
+                    torch.full_like(next_logits, -torch.inf),
+                    next_logits,
+                )
+            if sampling == "greedy":
+                next_token = next_logits.argmax(dim=-1, keepdim=True)
+            else:
+                probabilities = torch.softmax(next_logits, dim=-1)
+                next_token = torch.multinomial(probabilities, num_samples=1)
+            output = torch.cat((output, next_token), dim=1)
+        if was_training:
+            self.train()
+        return output
 
     @torch.no_grad()
     def spike_rates(self, input_ids: torch.Tensor) -> dict[str, float]:

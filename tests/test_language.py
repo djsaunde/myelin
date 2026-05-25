@@ -76,6 +76,27 @@ def test_spike_language_model_returns_logits_loss_and_spike_rates() -> None:
     assert "blocks.0.channel" in rates
 
 
+def test_spike_language_model_generate_extends_context_and_restores_training() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=7,
+        context_length=4,
+        n_layer=1,
+        n_embd=8,
+        dropout=0.0,
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    model.train()
+    input_ids = torch.tensor([[0, 1, 2, 3, 4, 5]])
+
+    generated = model.generate(input_ids, max_new_tokens=3, sampling="greedy")
+
+    assert generated.shape == (1, 9)
+    assert torch.equal(generated[:, : input_ids.shape[1]], input_ids)
+    assert model.training
+
+
 def test_spike_language_model_rejects_context_overflow() -> None:
     model = SpikeLanguageModel(SpikeGPTConfig(vocab_size=5, context_length=4))
 

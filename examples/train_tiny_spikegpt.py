@@ -31,6 +31,10 @@ def encode_text(text: str) -> tuple[torch.Tensor, dict[str, int], list[str]]:
     return encoded, stoi, vocab
 
 
+def decode_tokens(tokens: torch.Tensor, vocab: list[str]) -> str:
+    return "".join(vocab[index] for index in tokens.tolist())
+
+
 def sample_batch(
     tokens: torch.Tensor,
     *,
@@ -68,6 +72,8 @@ def main() -> None:
         ),
     )
     parser.add_argument("--log-every", type=int, default=10)
+    parser.add_argument("--sample-prompt", default="spik")
+    parser.add_argument("--sample-tokens", type=int, default=48)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--dense-embedding",
@@ -146,6 +152,24 @@ def main() -> None:
 
     print()
     print_step_time_summary(step_times)
+    prompt = args.sample_prompt
+    missing_chars = sorted(set(prompt) - set(vocab))
+    if missing_chars:
+        print(
+            f"sample_skipped=prompt contains out-of-vocabulary chars: {missing_chars}", flush=True
+        )
+        return
+    stoi = {char: index for index, char in enumerate(vocab)}
+    prompt_tokens = torch.tensor(
+        [[stoi[char] for char in prompt]], dtype=torch.long, device=args.device
+    )
+    generated = raw_model.generate(
+        prompt_tokens,
+        max_new_tokens=args.sample_tokens,
+        top_k=min(8, len(vocab)),
+        sampling="greedy",
+    )
+    print(f"sample={decode_tokens(generated[0].cpu(), vocab)!r}", flush=True)
 
 
 if __name__ == "__main__":
