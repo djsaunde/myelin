@@ -27,9 +27,11 @@ from spiker import (
     SPIKEGPT_PRESETS,
     ByteVocabulary,
     CharacterVocabulary,
+    LanguageVocabulary,
     SpikeGPTConfig,
     SpikeLanguageModel,
     evaluate_language_model,
+    load_spike_language_checkpoint,
     sample_token_batch,
     save_spike_language_checkpoint,
     spikegpt_config_from_preset,
@@ -40,6 +42,12 @@ DEFAULT_TEXT = (
     "spiking neural networks trade dense activations for sparse events. "
     "spiker explores fast training paths for those event driven models. "
 )
+
+
+def vocabulary_name(vocabulary: LanguageVocabulary) -> str:
+    if isinstance(vocabulary, ByteVocabulary):
+        return "byte"
+    return "char"
 
 
 def main() -> None:
@@ -92,6 +100,13 @@ def main() -> None:
     parser.add_argument("--sample-prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
     parser.add_argument(
+        "--checkpoint-in",
+        type=Path,
+        help=(
+            "optional SpikeGPT checkpoint to resume from; model config and vocabulary come from it"
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-out",
         type=Path,
         help="optional path for saving the trained SpikeGPT model checkpoint",
@@ -117,57 +132,76 @@ def main() -> None:
     torch.manual_seed(args.seed)
     configure_matmul_precision(args.matmul_precision)
     text = args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
-    vocabulary = (
-        CharacterVocabulary.from_text(text)
-        if args.vocab == "char"
-        else ByteVocabulary.from_text(text)
+    checkpoint = (
+        load_spike_language_checkpoint(args.checkpoint_in, map_location=args.device)
+        if args.checkpoint_in is not None
+        else None
     )
+    if checkpoint is None:
+        vocabulary = (
+            CharacterVocabulary.from_text(text)
+            if args.vocab == "char"
+            else ByteVocabulary.from_text(text)
+        )
+        config = (
+            SpikeGPTConfig(
+                vocab_size=vocabulary.size,
+                context_length=args.context_length,
+                n_layer=args.layers,
+                n_embd=args.embedding,
+                dropout=args.dropout,
+                lif_threshold=args.lif_threshold,
+                spike_embedding=not args.dense_embedding,
+                gradient_checkpointing=args.activation_checkpointing,
+            )
+            if args.preset == "custom"
+            else spikegpt_config_from_preset(
+                args.preset,
+                vocab_size=vocabulary.size,
+                dropout=args.dropout,
+                lif_threshold=args.lif_threshold,
+                spike_embedding=not args.dense_embedding,
+                gradient_checkpointing=args.activation_checkpointing,
+            )
+        )
+        raw_model = SpikeLanguageModel(config).to(device=args.device)
+        checkpoint_metadata: dict[str, object] = {}
+    else:
+        vocabulary = checkpoint.vocabulary
+        config = checkpoint.model.config
+        raw_model = checkpoint.model.to(device=args.device)
+        checkpoint_metadata = checkpoint.metadata
     tokens = vocabulary.encode(text)
     train_tokens, val_tokens = split_token_sequence(
         tokens,
         validation_fraction=args.val_fraction,
         min_validation_tokens=args.min_val_tokens,
     )
-    config = (
-        SpikeGPTConfig(
-            vocab_size=vocabulary.size,
-            context_length=args.context_length,
-            n_layer=args.layers,
-            n_embd=args.embedding,
-            dropout=args.dropout,
-            lif_threshold=args.lif_threshold,
-            spike_embedding=not args.dense_embedding,
-            gradient_checkpointing=args.activation_checkpointing,
-        )
-        if args.preset == "custom"
-        else spikegpt_config_from_preset(
-            args.preset,
-            vocab_size=vocabulary.size,
-            dropout=args.dropout,
-            lif_threshold=args.lif_threshold,
-            spike_embedding=not args.dense_embedding,
-            gradient_checkpointing=args.activation_checkpointing,
-        )
-    )
+    actual_vocab = vocabulary_name(vocabulary)
+    actual_activation_checkpointing = raw_model.gradient_checkpointing
     compile_model = resolve_compile_policy(args.compile, args.device)
-    raw_model = SpikeLanguageModel(config).to(device=args.device)
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
-        f"vocab:{args.vocab},preset:{args.preset},"
+        f"vocab:{actual_vocab},preset:{args.preset},"
         f"context_length:{config.context_length},layers:{config.n_layer},"
         f"embedding:{config.n_embd},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},"
-        f"weight_decay:{args.weight_decay},dropout:{args.dropout},"
-        f"lif_threshold:{args.lif_threshold},"
+        f"weight_decay:{args.weight_decay},dropout:{config.dropout},"
+        f"lif_threshold:{config.lif_threshold},"
         f"grad_clip:{args.grad_clip},"
         f"compile_warmup:{args.compile_warmup},"
-        f"spike_embedding:{not args.dense_embedding},"
-        f"activation_checkpointing:{args.activation_checkpointing},"
+        f"spike_embedding:{config.spike_embedding},"
+        f"activation_checkpointing:{actual_activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
-        f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()}",
+        f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()},"
+        f"checkpoint_in:{'' if args.checkpoint_in is None else args.checkpoint_in}",
         flush=True,
     )
+    if checkpoint is not None:
+        print(f"checkpoint_loaded={args.checkpoint_in}", flush=True)
+        if checkpoint_metadata:
+            print(f"checkpoint_metadata={checkpoint_metadata}", flush=True)
     print()
     print_model_summary(raw_model)
     print()
@@ -182,7 +216,7 @@ def main() -> None:
             "device": args.device,
             "compile": compile_model,
             "compile_policy": args.compile,
-            "vocab": args.vocab,
+            "vocab": actual_vocab,
             "preset": args.preset,
             "context_length": config.context_length,
             "layers": config.n_layer,
@@ -191,15 +225,16 @@ def main() -> None:
             "steps": args.steps,
             "lr": args.lr,
             "weight_decay": args.weight_decay,
-            "dropout": args.dropout,
-            "lif_threshold": args.lif_threshold,
+            "dropout": config.dropout,
+            "lif_threshold": config.lif_threshold,
             "grad_clip": args.grad_clip,
             "compile_warmup": args.compile_warmup,
-            "spike_embedding": not args.dense_embedding,
-            "activation_checkpointing": args.activation_checkpointing,
+            "spike_embedding": config.spike_embedding,
+            "activation_checkpointing": actual_activation_checkpointing,
             "vocab_size": vocabulary.size,
             "train_tokens": train_tokens.numel(),
             "val_tokens": val_tokens.numel(),
+            "checkpoint_in": "" if args.checkpoint_in is None else str(args.checkpoint_in),
         },
     )
     step_times: list[float] = []
@@ -323,7 +358,7 @@ def main() -> None:
             raw_model,
             vocabulary,
             metadata={
-                "vocab": args.vocab,
+                "vocab": actual_vocab,
                 "preset": args.preset,
                 "steps": args.steps,
                 "batch": args.batch,

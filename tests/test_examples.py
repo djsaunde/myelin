@@ -302,6 +302,49 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "sample=" in result.stdout
     assert checkpoint_path.exists()
 
+    resumed = subprocess.run(
+        [
+            sys.executable,
+            str(example),
+            "--device",
+            "cpu",
+            "--compile",
+            "off",
+            "--vocab",
+            "char",
+            "--steps",
+            "1",
+            "--batch",
+            "2",
+            "--context-length",
+            "16",
+            "--layers",
+            "2",
+            "--embedding",
+            "16",
+            "--log-every",
+            "1",
+            "--eval-every",
+            "1",
+            "--eval-batches",
+            "1",
+            "--sample-prompt",
+            "sp",
+            "--sample-tokens",
+            "1",
+            "--checkpoint-in",
+            str(checkpoint_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "checkpoint_loaded=" in resumed.stdout
+    assert "vocab:byte" in resumed.stdout
+    assert "context_length:8,layers:1,embedding:8" in resumed.stdout
+
 
 @pytest.mark.extended
 def test_export_hardware_bundle_example_runs(tmp_path: Path) -> None:
