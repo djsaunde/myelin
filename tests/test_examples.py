@@ -253,6 +253,9 @@ def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
 @pytest.mark.extended
 def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "train_tiny_spikegpt.py"
+    evaluate_example = (
+        Path(__file__).resolve().parents[1] / "examples" / "evaluate_spikegpt_checkpoint.py"
+    )
     checkpoint_path = tmp_path / "spikegpt.pt"
 
     result = subprocess.run(
@@ -344,6 +347,35 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "checkpoint_loaded=" in resumed.stdout
     assert "vocab:byte" in resumed.stdout
     assert "context_length:8,layers:1,embedding:8" in resumed.stdout
+
+    evaluated = subprocess.run(
+        [
+            sys.executable,
+            str(evaluate_example),
+            str(checkpoint_path),
+            "--device",
+            "cpu",
+            "--text",
+            "spiking neural networks trade dense activations for sparse events. "
+            "spiker explores fast training paths for those event driven models. ",
+            "--batch",
+            "2",
+            "--eval-batches",
+            "1",
+            "--prompt",
+            "sp",
+            "--sample-tokens",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "use_cache:True" in evaluated.stdout
+    assert "| Loss | BPC | PPL |" in evaluated.stdout
+    assert "sample=" in evaluated.stdout
 
 
 @pytest.mark.extended
