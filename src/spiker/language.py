@@ -63,6 +63,48 @@ class LanguageEval:
 
 
 @dataclass(frozen=True)
+class SpikeTimeMixState:
+    """Cached recurrent state for one ``SpikeTimeMix`` module."""
+
+    previous: torch.Tensor
+    numerator: torch.Tensor
+    denominator: torch.Tensor
+    log_scale: torch.Tensor
+
+
+@dataclass(frozen=True)
+class SpikeChannelMixState:
+    """Cached previous-token state for one ``SpikeChannelMix`` module."""
+
+    previous: torch.Tensor
+
+
+@dataclass(frozen=True)
+class SpikingSequenceLIFState:
+    """Cached membrane state for one sequence LIF module."""
+
+    membrane: torch.Tensor
+
+
+@dataclass(frozen=True)
+class SpikeGPTBlockState:
+    """Cached recurrent state for one ``SpikeGPTBlock``."""
+
+    time_mix: SpikeTimeMixState | None
+    ffn_pre: SpikeChannelMixState | None
+    channel_mix: SpikeChannelMixState
+    lif1: SpikingSequenceLIFState
+    lif2: SpikingSequenceLIFState
+
+
+@dataclass(frozen=True)
+class SpikeLanguageModelState:
+    """Cached recurrent state for autoregressive SpikeGPT-style inference."""
+
+    blocks: tuple[SpikeGPTBlockState, ...]
+
+
+@dataclass(frozen=True)
 class SpikeGPTConfig:
     """Configuration for a compact SpikeGPT-style recurrent language model."""
 
@@ -103,6 +145,29 @@ def _mix_with_previous(
 ) -> torch.Tensor:
     previous = _time_shift(inputs)
     return inputs * mix + previous * (1.0 - mix)
+
+
+def _sample_next_token(
+    logits: torch.Tensor,
+    *,
+    temperature: float,
+    top_k: int | None,
+    sampling: SamplingMode,
+) -> torch.Tensor:
+    next_logits = logits / temperature
+    if top_k is not None:
+        limit = min(top_k, next_logits.shape[-1])
+        values, _indices = torch.topk(next_logits, limit, dim=-1)
+        threshold = values[:, -1].unsqueeze(-1)
+        next_logits = torch.where(
+            next_logits < threshold,
+            torch.full_like(next_logits, -torch.inf),
+            next_logits,
+        )
+    if sampling == "greedy":
+        return next_logits.argmax(dim=-1, keepdim=True)
+    probabilities = torch.softmax(next_logits, dim=-1)
+    return torch.multinomial(probabilities, num_samples=1)
 
 
 def weighted_key_value(
@@ -283,21 +348,55 @@ class SpikingSequenceLIF(nn.Module):
     def decay(self) -> float:
         return 1.0 - (1.0 / self.tau)
 
+    def initial_state(
+        self,
+        *,
+        batch_size: int,
+        features: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> SpikingSequenceLIFState:
+        return SpikingSequenceLIFState(
+            membrane=torch.zeros((batch_size, features), device=device, dtype=dtype)
+        )
+
+    def step(
+        self,
+        inputs: torch.Tensor,
+        state: SpikingSequenceLIFState,
+    ) -> tuple[torch.Tensor, SpikingSequenceLIFState]:
+        if inputs.ndim != 2:
+            msg = f"inputs must have shape [B, C]; got {inputs.shape}"
+            raise ValueError(msg)
+        if state.membrane.shape != inputs.shape:
+            msg = (
+                "state.membrane and inputs must have the same shape; "
+                f"got {state.membrane.shape} and {inputs.shape}"
+            )
+            raise ValueError(msg)
+        membrane = state.membrane * self.decay + inputs
+        centered = self.surrogate_slope * (membrane - self.threshold)
+        if self.hard_forward:
+            spike = hard_surrogate_spike(centered, self.surrogate)
+        else:
+            spike = self.surrogate(centered)
+        membrane = membrane * (1.0 - spike) + self.reset * spike
+        return spike, SpikingSequenceLIFState(membrane=membrane)
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         if inputs.ndim != 3:
             msg = f"inputs must have shape [B, T, C]; got {inputs.shape}"
             raise ValueError(msg)
 
-        membrane = torch.zeros_like(inputs[:, 0])
+        state = self.initial_state(
+            batch_size=inputs.shape[0],
+            features=inputs.shape[2],
+            device=inputs.device,
+            dtype=inputs.dtype,
+        )
         spikes: list[torch.Tensor] = []
         for step in range(inputs.shape[1]):
-            membrane = membrane * self.decay + inputs[:, step]
-            centered = self.surrogate_slope * (membrane - self.threshold)
-            if self.hard_forward:
-                spike = hard_surrogate_spike(centered, self.surrogate)
-            else:
-                spike = self.surrogate(centered)
-            membrane = membrane * (1.0 - spike) + self.reset * spike
+            spike, state = self.step(inputs[:, step], state)
             spikes.append(spike)
         return torch.stack(spikes, dim=1)
 
@@ -338,6 +437,64 @@ class SpikeTimeMix(nn.Module):
         self.receptance = nn.Linear(n_embd, attn_size, bias=False)
         self.output = nn.Linear(attn_size, n_embd, bias=False)
 
+    def initial_state(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> SpikeTimeMixState:
+        features = self.time_decay.numel()
+        return SpikeTimeMixState(
+            previous=torch.zeros((batch_size, features), device=device, dtype=dtype),
+            numerator=torch.zeros((batch_size, features), device=device, dtype=dtype),
+            denominator=torch.zeros((batch_size, features), device=device, dtype=dtype),
+            log_scale=torch.full(
+                (batch_size, features),
+                torch.finfo(dtype).min,
+                device=device,
+                dtype=dtype,
+            ),
+        )
+
+    def step(
+        self,
+        inputs: torch.Tensor,
+        state: SpikeTimeMixState,
+    ) -> tuple[torch.Tensor, SpikeTimeMixState]:
+        if inputs.ndim != 2:
+            msg = f"inputs must have shape [B, C]; got {inputs.shape}"
+            raise ValueError(msg)
+        previous = state.previous
+        key_input = inputs * self.time_mix_k[0, 0] + previous * (1.0 - self.time_mix_k[0, 0])
+        value_input = inputs * self.time_mix_v[0, 0] + previous * (1.0 - self.time_mix_v[0, 0])
+        receptance_input = inputs * self.time_mix_r[0, 0] + previous * (1.0 - self.time_mix_r[0, 0])
+        key = self.key(key_input)
+        value = self.value(value_input)
+        receptance = torch.sigmoid(self.receptance(receptance_input))
+
+        dtype = key.dtype
+        decay = -torch.exp(self.time_decay.to(device=key.device, dtype=dtype))
+        first = self.time_first.to(device=key.device, dtype=dtype)
+        next_log_scale = torch.maximum(state.log_scale, first + key)
+        old_scale = torch.exp(state.log_scale - next_log_scale)
+        new_scale = torch.exp(first + key - next_log_scale)
+        mixed = (old_scale * state.numerator + new_scale * value) / (
+            old_scale * state.denominator + new_scale
+        )
+
+        decayed_log_scale = state.log_scale + decay
+        recurrent_log_scale = torch.maximum(decayed_log_scale, key)
+        old_scale = torch.exp(decayed_log_scale - recurrent_log_scale)
+        new_scale = torch.exp(key - recurrent_log_scale)
+        next_state = SpikeTimeMixState(
+            previous=inputs,
+            numerator=old_scale * state.numerator + new_scale * value,
+            denominator=old_scale * state.denominator + new_scale,
+            log_scale=recurrent_log_scale,
+        )
+        return self.output(receptance * mixed), next_state
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         key_input = _mix_with_previous(inputs, self.time_mix_k)
         value_input = _mix_with_previous(inputs, self.time_mix_v)
@@ -363,6 +520,37 @@ class SpikeChannelMix(nn.Module):
         self.key = nn.Linear(n_embd, hidden_size, bias=False)
         self.receptance = nn.Linear(n_embd, n_embd, bias=False)
         self.value = nn.Linear(hidden_size, n_embd, bias=False)
+
+    def initial_state(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> SpikeChannelMixState:
+        return SpikeChannelMixState(
+            previous=torch.zeros(
+                (batch_size, self.receptance.out_features),
+                device=device,
+                dtype=dtype,
+            )
+        )
+
+    def step(
+        self,
+        inputs: torch.Tensor,
+        state: SpikeChannelMixState,
+    ) -> tuple[torch.Tensor, SpikeChannelMixState]:
+        if inputs.ndim != 2:
+            msg = f"inputs must have shape [B, C]; got {inputs.shape}"
+            raise ValueError(msg)
+        previous = state.previous
+        key_input = inputs * self.time_mix_k[0, 0] + previous * (1.0 - self.time_mix_k[0, 0])
+        receptance_input = inputs * self.time_mix_r[0, 0] + previous * (1.0 - self.time_mix_r[0, 0])
+        key = torch.relu(self.key(key_input)).square()
+        value = self.value(key)
+        receptance = torch.sigmoid(self.receptance(receptance_input))
+        return receptance * value, SpikeChannelMixState(previous=inputs)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         key_input = _mix_with_previous(inputs, self.time_mix_k)
@@ -406,6 +594,67 @@ class SpikeGPTBlock(nn.Module):
             surrogate_slope=config.surrogate_slope,
         )
         self.dropout = nn.Dropout(config.dropout)
+
+    def initial_state(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> SpikeGPTBlockState:
+        return SpikeGPTBlockState(
+            time_mix=None
+            if self.att is None
+            else self.att.initial_state(batch_size=batch_size, device=device, dtype=dtype),
+            ffn_pre=None
+            if self.ffn_pre is None
+            else self.ffn_pre.initial_state(batch_size=batch_size, device=device, dtype=dtype),
+            channel_mix=self.ffn.initial_state(batch_size=batch_size, device=device, dtype=dtype),
+            lif1=self.lif1.initial_state(
+                batch_size=batch_size,
+                features=self.config.n_embd,
+                device=device,
+                dtype=dtype,
+            ),
+            lif2=self.lif2.initial_state(
+                batch_size=batch_size,
+                features=self.config.n_embd,
+                device=device,
+                dtype=dtype,
+            ),
+        )
+
+    def step(
+        self,
+        inputs: torch.Tensor,
+        state: SpikeGPTBlockState,
+    ) -> tuple[torch.Tensor, SpikeGPTBlockState]:
+        if inputs.ndim != 2:
+            msg = f"inputs must have shape [B, C]; got {inputs.shape}"
+            raise ValueError(msg)
+        residual = self.ln0(inputs) if self.ln0 is not None else inputs
+        if self.ffn_pre is not None:
+            if state.ffn_pre is None:
+                raise RuntimeError("SpikeGPTBlockState missing ffn_pre state")
+            mixed, ffn_pre_state = self.ffn_pre.step(self.ln1(residual), state.ffn_pre)
+            time_mix_state = None
+        else:
+            if self.att is None or state.time_mix is None:
+                raise RuntimeError("SpikeGPTBlockState missing time_mix state")
+            mixed, time_mix_state = self.att.step(self.ln1(residual), state.time_mix)
+            ffn_pre_state = None
+        spike1, lif1_state = self.lif1.step(mixed, state.lif1)
+        residual = residual + spike1
+        channel_mixed, channel_state = self.ffn.step(self.ln2(residual), state.channel_mix)
+        spike2, lif2_state = self.lif2.step(channel_mixed, state.lif2)
+        residual = self.dropout(residual + spike2)
+        return residual, SpikeGPTBlockState(
+            time_mix=time_mix_state,
+            ffn_pre=ffn_pre_state,
+            channel_mix=channel_state,
+            lif1=lif1_state,
+            lif2=lif2_state,
+        )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         residual = self.ln0(inputs) if self.ln0 is not None else inputs
@@ -451,6 +700,46 @@ class SpikeLanguageModel(nn.Module):
             atan_surrogate,
         )
 
+    def initial_state(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> SpikeLanguageModelState:
+        parameter = self.embedding.weight
+        resolved_device = parameter.device if device is None else device
+        resolved_dtype = parameter.dtype if dtype is None else dtype
+        return SpikeLanguageModelState(
+            blocks=tuple(
+                cast(SpikeGPTBlock, block).initial_state(
+                    batch_size=batch_size,
+                    device=resolved_device,
+                    dtype=resolved_dtype,
+                )
+                for block in self.blocks
+            )
+        )
+
+    def forward_step(
+        self,
+        input_ids: torch.Tensor,
+        state: SpikeLanguageModelState,
+    ) -> tuple[torch.Tensor, SpikeLanguageModelState]:
+        """Run one autoregressive token step with cached recurrent state."""
+
+        if input_ids.ndim != 1:
+            msg = f"input_ids must have shape [B]; got {input_ids.shape}"
+            raise ValueError(msg)
+        hidden = self.embed_tokens(input_ids)
+        next_block_states: list[SpikeGPTBlockState] = []
+        for raw_block, block_state in zip(self.blocks, state.blocks, strict=True):
+            block = cast(SpikeGPTBlock, raw_block)
+            hidden, next_block_state = block.step(hidden, block_state)
+            next_block_states.append(next_block_state)
+        logits = self.head(self.ln_out(hidden))
+        return logits, SpikeLanguageModelState(blocks=tuple(next_block_states))
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -485,12 +774,13 @@ class SpikeLanguageModel(nn.Module):
         temperature: float = 1.0,
         top_k: int | None = None,
         sampling: SamplingMode = "multinomial",
+        use_cache: bool = True,
     ) -> torch.Tensor:
         """Autoregressively extend ``input_ids``.
 
-        This simple reference path recomputes the context window on each token.
-        A state-cached RNN path is the intended future optimization once the
-        training architecture is stable.
+        ``use_cache=True`` uses the recurrent RWKV/LIF state path. The fallback
+        path recomputes the context window and is kept as a simple correctness
+        reference.
         """
 
         if max_new_tokens < 0:
@@ -501,30 +791,51 @@ class SpikeLanguageModel(nn.Module):
             raise ValueError("top_k must be positive when provided")
         if sampling not in ("multinomial", "greedy"):
             raise ValueError("sampling must be 'multinomial' or 'greedy'")
+        if input_ids.ndim != 2:
+            msg = f"input_ids must have shape [B, T]; got {input_ids.shape}"
+            raise ValueError(msg)
+        if input_ids.shape[1] == 0:
+            raise ValueError("input_ids must contain at least one context token")
 
-        output = input_ids
         was_training = self.training
         self.eval()
+        if use_cache:
+            output = input_ids
+            state = self.initial_state(
+                batch_size=input_ids.shape[0],
+                device=input_ids.device,
+                dtype=self.embedding.weight.dtype,
+            )
+            logits = None
+            for step in range(input_ids.shape[1]):
+                logits, state = self.forward_step(input_ids[:, step], state)
+            for _ in range(max_new_tokens):
+                if logits is None:
+                    raise RuntimeError("generate requires at least one context token")
+                next_token = _sample_next_token(
+                    logits,
+                    temperature=temperature,
+                    top_k=top_k,
+                    sampling=sampling,
+                )
+                output = torch.cat((output, next_token), dim=1)
+                logits, state = self.forward_step(next_token[:, 0], state)
+            if was_training:
+                self.train()
+            return output
+
+        output = input_ids
         for _ in range(max_new_tokens):
             context = output[:, -self.config.context_length :]
             logits = self(context)
             if not isinstance(logits, torch.Tensor):
                 raise RuntimeError("generate expected logits-only forward output")
-            next_logits = logits[:, -1] / temperature
-            if top_k is not None:
-                limit = min(top_k, next_logits.shape[-1])
-                values, _indices = torch.topk(next_logits, limit, dim=-1)
-                threshold = values[:, -1].unsqueeze(-1)
-                next_logits = torch.where(
-                    next_logits < threshold,
-                    torch.full_like(next_logits, -torch.inf),
-                    next_logits,
-                )
-            if sampling == "greedy":
-                next_token = next_logits.argmax(dim=-1, keepdim=True)
-            else:
-                probabilities = torch.softmax(next_logits, dim=-1)
-                next_token = torch.multinomial(probabilities, num_samples=1)
+            next_token = _sample_next_token(
+                logits[:, -1],
+                temperature=temperature,
+                top_k=top_k,
+                sampling=sampling,
+            )
             output = torch.cat((output, next_token), dim=1)
         if was_training:
             self.train()

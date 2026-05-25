@@ -132,6 +132,50 @@ def test_spike_language_model_generate_extends_context_and_restores_training() -
     assert model.training
 
 
+def test_cached_forward_step_matches_full_sequence_logits() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=9,
+        context_length=6,
+        n_layer=2,
+        n_embd=12,
+        dropout=0.0,
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    model.eval()
+    input_ids = torch.randint(0, config.vocab_size, (2, config.context_length))
+
+    full_logits = model(input_ids)
+    state = model.initial_state(batch_size=input_ids.shape[0])
+    step_logits = []
+    for step in range(input_ids.shape[1]):
+        logits, state = model.forward_step(input_ids[:, step], state)
+        step_logits.append(logits)
+
+    assert isinstance(full_logits, torch.Tensor)
+    assert torch.allclose(torch.stack(step_logits, dim=1), full_logits, atol=1e-6)
+
+
+def test_cached_and_uncached_greedy_generation_match_within_context_window() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=7,
+        context_length=8,
+        n_layer=1,
+        n_embd=8,
+        dropout=0.0,
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    input_ids = torch.tensor([[0, 1, 2]])
+
+    cached = model.generate(input_ids, max_new_tokens=3, sampling="greedy", use_cache=True)
+    uncached = model.generate(input_ids, max_new_tokens=3, sampling="greedy", use_cache=False)
+
+    assert torch.equal(cached, uncached)
+
+
 def test_evaluate_language_model_reports_loss_bpc_and_restores_training() -> None:
     torch.manual_seed(0)
     model = SpikeLanguageModel(
