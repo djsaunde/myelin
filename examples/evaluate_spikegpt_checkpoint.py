@@ -30,6 +30,12 @@ def main() -> None:
     )
     parser.add_argument("--prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
+    parser.add_argument(
+        "--sample",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="generate a sample after evaluation",
+    )
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--sampling", choices=("greedy", "multinomial"), default="greedy")
@@ -96,6 +102,10 @@ def main() -> None:
                 f"{metrics.perplexity:.4f} |",
                 flush=True,
             )
+
+    if not args.sample:
+        print("sample_skipped=disabled", flush=True)
+        return
 
     try:
         prompt_tokens = vocabulary.encode(args.prompt)

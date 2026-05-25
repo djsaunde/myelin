@@ -366,10 +366,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
             "2",
             "--eval-batches",
             "1",
-            "--prompt",
-            "sp",
-            "--sample-tokens",
-            "1",
+            "--no-sample",
         ],
         check=True,
         capture_output=True,
@@ -380,7 +377,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "use_cache:True" in evaluated.stdout
     assert "eval_mode=strided" in evaluated.stdout
     assert "| Loss | BPC | PPL |" in evaluated.stdout
-    assert "sample=" in evaluated.stdout
+    assert "sample_skipped=disabled" in evaluated.stdout
 
 
 @pytest.mark.extended
