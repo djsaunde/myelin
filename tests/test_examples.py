@@ -251,6 +251,53 @@ def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
 
 
 @pytest.mark.extended
+def test_tiny_spikegpt_example_runs_on_cpu() -> None:
+    example = Path(__file__).resolve().parents[1] / "examples" / "train_tiny_spikegpt.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(example),
+            "--device",
+            "cpu",
+            "--compile",
+            "off",
+            "--vocab",
+            "byte",
+            "--steps",
+            "2",
+            "--batch",
+            "2",
+            "--context-length",
+            "8",
+            "--layers",
+            "1",
+            "--embedding",
+            "8",
+            "--log-every",
+            "1",
+            "--eval-every",
+            "2",
+            "--eval-batches",
+            "1",
+            "--sample-prompt",
+            "sp",
+            "--sample-tokens",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "vocab:byte" in result.stdout
+    assert "weight_decay:0.01" in result.stdout
+    assert "Grad Norm" in result.stdout
+    assert "sample=" in result.stdout
+
+
+@pytest.mark.extended
 def test_export_hardware_bundle_example_runs(tmp_path: Path) -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
 

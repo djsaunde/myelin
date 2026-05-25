@@ -9,9 +9,15 @@ from pathlib import Path
 import torch
 from example_utils import (
     add_compile_policy_arg,
+    add_grad_clip_arg,
     add_matmul_precision_arg,
+    add_wandb_args,
+    clip_gradients,
     compile_training_model,
     configure_matmul_precision,
+    finish_wandb,
+    init_wandb,
+    log_wandb,
     print_model_summary,
     print_step_time_summary,
     resolve_compile_policy,
@@ -52,6 +58,7 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument(
         "--lif-threshold",
@@ -80,7 +87,9 @@ def main() -> None:
         help="checkpoint SpikeGPT blocks during training to reduce saved activations",
     )
     add_compile_policy_arg(parser)
+    add_grad_clip_arg(parser)
     add_matmul_precision_arg(parser)
+    add_wandb_args(parser)
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -114,8 +123,10 @@ def main() -> None:
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
         f"vocab:{args.vocab},"
         f"context_length:{args.context_length},layers:{args.layers},embedding:{args.embedding},"
-        f"batch:{args.batch},steps:{args.steps},lr:{args.lr},dropout:{args.dropout},"
+        f"batch:{args.batch},steps:{args.steps},lr:{args.lr},"
+        f"weight_decay:{args.weight_decay},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"
+        f"grad_clip:{args.grad_clip},"
         f"spike_embedding:{not args.dense_embedding},"
         f"activation_checkpointing:{args.activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
@@ -127,60 +138,108 @@ def main() -> None:
     print()
 
     model = compile_training_model(raw_model, compile_model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    wandb_run = init_wandb(
+        enabled=args.wandb,
+        project=args.wandb_project,
+        run_name=args.wandb_run_name,
+        config={
+            "device": args.device,
+            "compile": compile_model,
+            "compile_policy": args.compile,
+            "vocab": args.vocab,
+            "context_length": args.context_length,
+            "layers": args.layers,
+            "embedding": args.embedding,
+            "batch": args.batch,
+            "steps": args.steps,
+            "lr": args.lr,
+            "weight_decay": args.weight_decay,
+            "dropout": args.dropout,
+            "lif_threshold": args.lif_threshold,
+            "grad_clip": args.grad_clip,
+            "spike_embedding": not args.dense_embedding,
+            "activation_checkpointing": args.activation_checkpointing,
+            "vocab_size": vocabulary.size,
+            "train_tokens": train_tokens.numel(),
+            "val_tokens": val_tokens.numel(),
+        },
+    )
     step_times: list[float] = []
 
     print(
         "| Step | Train Loss | Val Loss | Val BPC | Val PPL | "
-        "Emb Spike Rate | Mean Block Spike Rate | Step ms |",
+        "Emb Spike Rate | Mean Block Spike Rate | Grad Norm | Step ms |",
         flush=True,
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|", flush=True)
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|", flush=True)
 
-    model.train()
-    for step in range(1, args.steps + 1):
-        inputs, targets = sample_token_batch(
-            train_tokens,
-            batch_size=args.batch,
-            context_length=args.context_length,
-            device=args.device,
-        )
-        torch_device = torch.device(args.device)
-        if torch_device.type == "cuda":
-            torch.cuda.synchronize(torch_device)
-        start = time.perf_counter()
-        optimizer.zero_grad()
-        loss, _logits = model(inputs, targets)
-        loss.backward()
-        optimizer.step()
-        if torch_device.type == "cuda":
-            torch.cuda.synchronize(torch_device)
-        step_seconds = time.perf_counter() - start
-        step_times.append(step_seconds)
-
-        if step == 1 or step % args.log_every == 0 or step == args.steps:
-            rates = raw_model.spike_rates(inputs)
-            block_rates = [value for key, value in rates.items() if key != "embedding"]
-            mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
-            eval_metrics = None
-            if step == 1 or step % args.eval_every == 0 or step == args.steps:
-                eval_metrics = evaluate_language_model(
-                    raw_model,
-                    val_tokens,
-                    batch_size=args.batch,
-                    context_length=args.context_length,
-                    device=args.device,
-                    batches=args.eval_batches,
-                )
-            print(
-                f"| {step} | {float(loss.detach()):.6f} | "
-                f"{'' if eval_metrics is None else f'{eval_metrics.loss:.6f}'} | "
-                f"{'' if eval_metrics is None else f'{eval_metrics.bits_per_character:.4f}'} | "
-                f"{'' if eval_metrics is None else f'{eval_metrics.perplexity:.4f}'} | "
-                f"{rates['embedding']:.4f} | {mean_block_rate:.4f} | "
-                f"{step_seconds * 1000:.3f} |",
-                flush=True,
+    try:
+        model.train()
+        for step in range(1, args.steps + 1):
+            inputs, targets = sample_token_batch(
+                train_tokens,
+                batch_size=args.batch,
+                context_length=args.context_length,
+                device=args.device,
             )
+            torch_device = torch.device(args.device)
+            if torch_device.type == "cuda":
+                torch.cuda.synchronize(torch_device)
+            start = time.perf_counter()
+            optimizer.zero_grad(set_to_none=True)
+            loss, _logits = model(inputs, targets)
+            loss.backward()
+            grad_norm = clip_gradients(model, args.grad_clip)
+            optimizer.step()
+            if torch_device.type == "cuda":
+                torch.cuda.synchronize(torch_device)
+            step_seconds = time.perf_counter() - start
+            step_times.append(step_seconds)
+
+            if step == 1 or step % args.log_every == 0 or step == args.steps:
+                rates = raw_model.spike_rates(inputs)
+                block_rates = [value for key, value in rates.items() if key != "embedding"]
+                mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
+                eval_metrics = None
+                if step == 1 or step % args.eval_every == 0 or step == args.steps:
+                    eval_metrics = evaluate_language_model(
+                        raw_model,
+                        val_tokens,
+                        batch_size=args.batch,
+                        context_length=args.context_length,
+                        device=args.device,
+                        batches=args.eval_batches,
+                    )
+                print(
+                    f"| {step} | {float(loss.detach()):.6f} | "
+                    f"{'' if eval_metrics is None else f'{eval_metrics.loss:.6f}'} | "
+                    f"{'' if eval_metrics is None else f'{eval_metrics.bits_per_character:.4f}'} | "
+                    f"{'' if eval_metrics is None else f'{eval_metrics.perplexity:.4f}'} | "
+                    f"{rates['embedding']:.4f} | {mean_block_rate:.4f} | "
+                    f"{'' if grad_norm is None else f'{grad_norm:.4f}'} | "
+                    f"{step_seconds * 1000:.3f} |",
+                    flush=True,
+                )
+                wandb_metrics = {
+                    "train/loss": float(loss.detach()),
+                    "train/embedding_spike_rate": rates["embedding"],
+                    "train/mean_block_spike_rate": mean_block_rate,
+                    "train/step_ms": step_seconds * 1000,
+                }
+                if grad_norm is not None:
+                    wandb_metrics["train/grad_norm"] = grad_norm
+                if eval_metrics is not None:
+                    wandb_metrics.update(
+                        {
+                            "val/loss": eval_metrics.loss,
+                            "val/bpc": eval_metrics.bits_per_character,
+                            "val/perplexity": eval_metrics.perplexity,
+                        }
+                    )
+                log_wandb(wandb_run, wandb_metrics, step=step)
+    finally:
+        finish_wandb(wandb_run)
 
     print()
     print_step_time_summary(step_times)
