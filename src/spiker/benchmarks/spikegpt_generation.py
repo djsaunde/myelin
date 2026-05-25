@@ -140,7 +140,8 @@ def print_markdown(args: argparse.Namespace, rows: list[GenerationResult]) -> No
         f"batch={args.batch}, prompt_tokens={args.prompt_tokens}, "
         f"new_tokens={args.new_tokens}, preset={args.preset}, "
         f"context_length={config.context_length}, layers={config.n_layer}, "
-        f"embedding={config.n_embd}, vocab_size={args.vocab_size}"
+        f"embedding={config.n_embd}, model_type={config.model_type}, "
+        f"vocab_size={args.vocab_size}"
     )
     print(f"Warmup: {args.warmup}; repeats: {args.repeats}; seed: {args.seed}")
     print()
@@ -164,6 +165,7 @@ def main() -> None:
     parser.add_argument("--context-length", type=int, default=128)
     parser.add_argument("--layers", type=int, default=4)
     parser.add_argument("--embedding", type=int, default=128)
+    parser.add_argument("--model-type", choices=("rwkv", "rwkv-ffn-pre"), default="rwkv")
     parser.add_argument("--vocab-size", type=int, default=512)
     parser.add_argument("--lif-threshold", type=float, default=0.0)
     parser.add_argument(

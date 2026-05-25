@@ -20,6 +20,7 @@ from spiker.benchmarks.lif import format_memory, format_ms, gpu_name
 from spiker.language import (
     SPIKEGPT_PRESETS,
     SpikeGPTConfig,
+    SpikeGPTModelType,
     SpikeGPTPreset,
     SpikeLanguageModel,
     spikegpt_config_from_preset,
@@ -40,6 +41,7 @@ def resolve_config(args: argparse.Namespace) -> SpikeGPTConfig:
     preset = getattr(args, "preset", "custom")
     dropout = getattr(args, "dropout", 0.0)
     lif_threshold = getattr(args, "lif_threshold", 0.0)
+    model_type = cast(SpikeGPTModelType, getattr(args, "model_type", "rwkv"))
     spike_embedding = not getattr(args, "dense_embedding", False)
     if preset == "custom":
         return SpikeGPTConfig(
@@ -48,6 +50,7 @@ def resolve_config(args: argparse.Namespace) -> SpikeGPTConfig:
             n_layer=args.layers,
             n_embd=args.embedding,
             dropout=dropout,
+            model_type=model_type,
             lif_threshold=lif_threshold,
             spike_embedding=spike_embedding,
         )
@@ -55,6 +58,7 @@ def resolve_config(args: argparse.Namespace) -> SpikeGPTConfig:
         cast(SpikeGPTPreset, preset),
         vocab_size=args.vocab_size,
         dropout=dropout,
+        model_type=model_type,
         lif_threshold=lif_threshold,
         spike_embedding=spike_embedding,
     )
@@ -216,7 +220,8 @@ def print_markdown(args: argparse.Namespace, rows: list[TrainingResult]) -> None
     print(
         "Shape: "
         f"batch={args.batch}, preset={args.preset}, context_length={config.context_length}, "
-        f"layers={config.n_layer}, embedding={config.n_embd}, vocab_size={args.vocab_size}"
+        f"layers={config.n_layer}, embedding={config.n_embd}, model_type={config.model_type}, "
+        f"vocab_size={args.vocab_size}"
     )
     print(
         f"Warmup: {args.warmup}; repeats: {args.repeats}; seed: {args.seed}; "
@@ -243,6 +248,7 @@ def main() -> None:
     parser.add_argument("--context-length", type=int, default=128)
     parser.add_argument("--layers", type=int, default=4)
     parser.add_argument("--embedding", type=int, default=128)
+    parser.add_argument("--model-type", choices=("rwkv", "rwkv-ffn-pre"), default="rwkv")
     parser.add_argument("--vocab-size", type=int, default=512)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--lif-threshold", type=float, default=0.0)
