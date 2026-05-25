@@ -251,8 +251,9 @@ def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
 
 
 @pytest.mark.extended
-def test_tiny_spikegpt_example_runs_on_cpu() -> None:
+def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "train_tiny_spikegpt.py"
+    checkpoint_path = tmp_path / "spikegpt.pt"
 
     result = subprocess.run(
         [
@@ -284,6 +285,8 @@ def test_tiny_spikegpt_example_runs_on_cpu() -> None:
             "sp",
             "--sample-tokens",
             "2",
+            "--checkpoint-out",
+            str(checkpoint_path),
         ],
         check=True,
         capture_output=True,
@@ -295,7 +298,9 @@ def test_tiny_spikegpt_example_runs_on_cpu() -> None:
     assert "weight_decay:0.01" in result.stdout
     assert "compile_warmup:True" in result.stdout
     assert "Grad Norm" in result.stdout
+    assert f"checkpoint={checkpoint_path}" in result.stdout
     assert "sample=" in result.stdout
+    assert checkpoint_path.exists()
 
 
 @pytest.mark.extended

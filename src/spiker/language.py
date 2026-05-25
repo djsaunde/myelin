@@ -9,8 +9,10 @@ specialize the WKV recurrence or spike operators.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, cast
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from os import PathLike
+from typing import Any, Literal, TypeAlias, cast
 
 import torch
 from torch import nn
@@ -79,6 +81,9 @@ class ByteVocabulary:
         return bytes(values).decode("utf-8", errors="replace")
 
 
+LanguageVocabulary: TypeAlias = CharacterVocabulary | ByteVocabulary
+
+
 @dataclass(frozen=True)
 class LanguageEval:
     """Evaluation metrics for autoregressive character language modeling."""
@@ -86,6 +91,15 @@ class LanguageEval:
     loss: float
     bits_per_character: float
     perplexity: float
+
+
+@dataclass(frozen=True)
+class SpikeLanguageCheckpoint:
+    """Loaded SpikeGPT-style model checkpoint."""
+
+    model: SpikeLanguageModel
+    vocabulary: CharacterVocabulary | ByteVocabulary
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -949,3 +963,134 @@ class SpikeLanguageModel(nn.Module):
             rates[f"blocks.{index}.channel"] = float(ffn_spikes.mean())
             hidden = block(hidden)
         return rates
+
+
+def _require_mapping(value: object, name: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    return cast(Mapping[str, object], value)
+
+
+def _require_bool(value: object, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a bool")
+    return value
+
+
+def _require_float(value: object, name: str) -> float:
+    if not isinstance(value, int | float):
+        raise ValueError(f"{name} must be numeric")
+    return float(value)
+
+
+def _require_int(value: object, name: str) -> int:
+    if not isinstance(value, int):
+        raise ValueError(f"{name} must be an int")
+    return value
+
+
+def _require_str(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    return value
+
+
+def spikegpt_config_to_dict(config: SpikeGPTConfig) -> dict[str, object]:
+    """Serialize a ``SpikeGPTConfig`` to a plain checkpoint-safe dictionary."""
+
+    return cast(dict[str, object], asdict(config))
+
+
+def spikegpt_config_from_dict(data: Mapping[str, object]) -> SpikeGPTConfig:
+    """Deserialize a ``SpikeGPTConfig`` from a checkpoint dictionary."""
+
+    config = SpikeGPTConfig(
+        vocab_size=_require_int(data.get("vocab_size"), "config.vocab_size"),
+        context_length=_require_int(data.get("context_length"), "config.context_length"),
+        n_layer=_require_int(data.get("n_layer", 4), "config.n_layer"),
+        n_embd=_require_int(data.get("n_embd", 128), "config.n_embd"),
+        dropout=_require_float(data.get("dropout", 0.03), "config.dropout"),
+        model_type=cast(
+            SpikeGPTModelType,
+            _require_str(data.get("model_type", "rwkv"), "config.model_type"),
+        ),
+        lif_tau=_require_float(data.get("lif_tau", 2.0), "config.lif_tau"),
+        lif_threshold=_require_float(data.get("lif_threshold", 1.0), "config.lif_threshold"),
+        lif_reset=_require_float(data.get("lif_reset", 0.0), "config.lif_reset"),
+        surrogate_slope=_require_float(data.get("surrogate_slope", 2.0), "config.surrogate_slope"),
+        spike_embedding=_require_bool(data.get("spike_embedding", True), "config.spike_embedding"),
+        gradient_checkpointing=_require_bool(
+            data.get("gradient_checkpointing", False),
+            "config.gradient_checkpointing",
+        ),
+    )
+    config.validate()
+    return config
+
+
+def language_vocabulary_to_dict(vocabulary: LanguageVocabulary) -> dict[str, object]:
+    """Serialize a SpikeGPT vocabulary to a plain checkpoint-safe dictionary."""
+
+    if isinstance(vocabulary, ByteVocabulary):
+        return {"type": "byte"}
+    return {"type": "character", "tokens": list(vocabulary.tokens)}
+
+
+def language_vocabulary_from_dict(data: Mapping[str, object]) -> LanguageVocabulary:
+    """Deserialize a SpikeGPT vocabulary from a checkpoint dictionary."""
+
+    vocabulary_type = _require_str(data.get("type"), "vocabulary.type")
+    if vocabulary_type == "byte":
+        return ByteVocabulary()
+    if vocabulary_type != "character":
+        raise ValueError(f"unsupported vocabulary type: {vocabulary_type}")
+    raw_tokens = data.get("tokens")
+    if not isinstance(raw_tokens, list) or not all(isinstance(item, str) for item in raw_tokens):
+        raise ValueError("character vocabulary tokens must be a list of strings")
+    if not raw_tokens:
+        raise ValueError("character vocabulary tokens must not be empty")
+    return CharacterVocabulary(tokens=tuple(raw_tokens))
+
+
+def save_spike_language_checkpoint(
+    path: str | PathLike[str],
+    model: SpikeLanguageModel,
+    vocabulary: LanguageVocabulary,
+    *,
+    metadata: Mapping[str, object] | None = None,
+) -> None:
+    """Save a SpikeGPT-style model, config, vocabulary, and metadata."""
+
+    payload = {
+        "format": "spiker.spike_language_checkpoint.v1",
+        "config": spikegpt_config_to_dict(model.config),
+        "vocabulary": language_vocabulary_to_dict(vocabulary),
+        "state_dict": model.state_dict(),
+        "metadata": dict(metadata or {}),
+    }
+    torch.save(payload, path)
+
+
+def load_spike_language_checkpoint(
+    path: str | PathLike[str],
+    *,
+    map_location: str | torch.device | None = None,
+) -> SpikeLanguageCheckpoint:
+    """Load a SpikeGPT-style model checkpoint saved by ``save_spike_language_checkpoint``."""
+
+    payload = torch.load(path, map_location=map_location)
+    if not isinstance(payload, Mapping):
+        raise ValueError("checkpoint payload must be a mapping")
+    if payload.get("format") != "spiker.spike_language_checkpoint.v1":
+        raise ValueError("unsupported SpikeLanguageModel checkpoint format")
+    config = spikegpt_config_from_dict(_require_mapping(payload.get("config"), "config"))
+    vocabulary = language_vocabulary_from_dict(
+        _require_mapping(payload.get("vocabulary"), "vocabulary")
+    )
+    raw_state_dict = payload.get("state_dict")
+    if not isinstance(raw_state_dict, Mapping):
+        raise ValueError("checkpoint state_dict must be a mapping")
+    model = SpikeLanguageModel(config)
+    model.load_state_dict(cast(Mapping[str, Any], raw_state_dict))
+    metadata = dict(_require_mapping(payload.get("metadata", {}), "metadata"))
+    return SpikeLanguageCheckpoint(model=model, vocabulary=vocabulary, metadata=metadata)

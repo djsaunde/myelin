@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -11,8 +13,14 @@ from spiker import (
     SpikeLanguageModel,
     SpikingSequenceLIF,
     evaluate_language_model,
+    language_vocabulary_from_dict,
+    language_vocabulary_to_dict,
+    load_spike_language_checkpoint,
     sample_token_batch,
+    save_spike_language_checkpoint,
+    spikegpt_config_from_dict,
     spikegpt_config_from_preset,
+    spikegpt_config_to_dict,
     split_token_sequence,
     weighted_key_value,
 )
@@ -65,6 +73,23 @@ def test_byte_vocabulary_round_trips_utf8_and_has_fixed_size() -> None:
     assert vocab.decode(encoded) == text
 
 
+def test_language_vocabulary_serialization_round_trips() -> None:
+    char_vocab = CharacterVocabulary.from_text("banana")
+    byte_vocab = ByteVocabulary()
+
+    restored_char = language_vocabulary_from_dict(language_vocabulary_to_dict(char_vocab))
+    restored_byte = language_vocabulary_from_dict(language_vocabulary_to_dict(byte_vocab))
+
+    assert isinstance(restored_char, CharacterVocabulary)
+    assert restored_char.tokens == char_vocab.tokens
+    assert isinstance(restored_byte, ByteVocabulary)
+
+
+def test_language_vocabulary_serialization_rejects_unknown_type() -> None:
+    with pytest.raises(ValueError, match="unsupported vocabulary type"):
+        language_vocabulary_from_dict({"type": "wordpiece"})
+
+
 def test_spikegpt_config_from_preset_uses_named_dimensions() -> None:
     config = spikegpt_config_from_preset(
         "tiny",
@@ -84,6 +109,23 @@ def test_spikegpt_config_from_preset_uses_named_dimensions() -> None:
     assert config.lif_threshold == 0.0
     assert not config.spike_embedding
     assert config.gradient_checkpointing
+
+
+def test_spikegpt_config_serialization_round_trips() -> None:
+    config = SpikeGPTConfig(
+        vocab_size=257,
+        context_length=16,
+        n_layer=2,
+        n_embd=32,
+        dropout=0.1,
+        lif_threshold=0.0,
+        spike_embedding=False,
+        gradient_checkpointing=True,
+    )
+
+    restored = spikegpt_config_from_dict(spikegpt_config_to_dict(config))
+
+    assert restored == config
 
 
 def test_split_token_sequence_and_sample_batch() -> None:
@@ -144,6 +186,40 @@ def test_spike_language_model_returns_logits_loss_and_spike_rates() -> None:
     assert "embedding" in rates
     assert "blocks.0.time" in rates
     assert "blocks.0.channel" in rates
+
+
+def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
+    tmp_path: Path,
+) -> None:
+    torch.manual_seed(0)
+    vocabulary = CharacterVocabulary.from_text("banana")
+    config = SpikeGPTConfig(
+        vocab_size=vocabulary.size,
+        context_length=4,
+        n_layer=1,
+        n_embd=8,
+        dropout=0.0,
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    input_ids = vocabulary.encode("bana").unsqueeze(0)
+    expected_logits = model(input_ids)
+    path = tmp_path / "spikegpt.pt"
+
+    save_spike_language_checkpoint(
+        path,
+        model,
+        vocabulary,
+        metadata={"steps": 3, "note": "unit"},
+    )
+    checkpoint = load_spike_language_checkpoint(path, map_location="cpu")
+    actual_logits = checkpoint.model(input_ids)
+
+    assert checkpoint.model.config == config
+    assert isinstance(checkpoint.vocabulary, CharacterVocabulary)
+    assert checkpoint.vocabulary.tokens == vocabulary.tokens
+    assert checkpoint.metadata == {"steps": 3, "note": "unit"}
+    assert torch.allclose(actual_logits, expected_logits)
 
 
 def test_spike_language_model_gradient_checkpointing_preserves_loss_and_gradients() -> None:

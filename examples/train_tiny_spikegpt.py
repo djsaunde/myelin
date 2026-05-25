@@ -31,6 +31,7 @@ from spiker import (
     SpikeLanguageModel,
     evaluate_language_model,
     sample_token_batch,
+    save_spike_language_checkpoint,
     spikegpt_config_from_preset,
     split_token_sequence,
 )
@@ -90,6 +91,11 @@ def main() -> None:
     )
     parser.add_argument("--sample-prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
+    parser.add_argument(
+        "--checkpoint-out",
+        type=Path,
+        help="optional path for saving the trained SpikeGPT model checkpoint",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--dense-embedding",
@@ -310,6 +316,27 @@ def main() -> None:
 
     print()
     print_step_time_summary(step_times)
+    if args.checkpoint_out is not None:
+        args.checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
+        save_spike_language_checkpoint(
+            args.checkpoint_out,
+            raw_model,
+            vocabulary,
+            metadata={
+                "vocab": args.vocab,
+                "preset": args.preset,
+                "steps": args.steps,
+                "batch": args.batch,
+                "lr": args.lr,
+                "weight_decay": args.weight_decay,
+                "grad_clip": args.grad_clip,
+                "seed": args.seed,
+                "train_tokens": train_tokens.numel(),
+                "val_tokens": val_tokens.numel(),
+            },
+        )
+        print(f"checkpoint={args.checkpoint_out}", flush=True)
+
     prompt = args.sample_prompt
     try:
         prompt_token_ids = vocabulary.encode(prompt)
