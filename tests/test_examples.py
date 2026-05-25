@@ -278,6 +278,8 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
             "1",
             "--embedding",
             "8",
+            "--model-type",
+            "rwkv-ffn-pre",
             "--log-every",
             "1",
             "--eval-every",
@@ -298,6 +300,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     )
 
     assert "vocab:byte" in result.stdout
+    assert "model_type:rwkv-ffn-pre" in result.stdout
     assert "weight_decay:0.01" in result.stdout
     assert "compile_warmup:True" in result.stdout
     assert "previous_steps:0,total_steps:2" in result.stdout
@@ -348,6 +351,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     assert "checkpoint_loaded=" in resumed.stdout
     assert "optimizer_loaded=True" in resumed.stdout
     assert "vocab:byte" in resumed.stdout
+    assert "model_type:rwkv-ffn-pre" in resumed.stdout
     assert "context_length:8,layers:1,embedding:8" in resumed.stdout
     assert "previous_steps:2,total_steps:3" in resumed.stdout
     assert "| 3 |" in resumed.stdout

@@ -79,6 +79,12 @@ def main() -> None:
     parser.add_argument("--context-length", type=int, default=32)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--embedding", type=int, default=64)
+    parser.add_argument(
+        "--model-type",
+        choices=("rwkv", "rwkv-ffn-pre"),
+        default="rwkv",
+        help="SpikeGPT block variant for fresh runs; checkpoints keep their saved model type",
+    )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--lr", type=float, default=3e-3)
@@ -157,6 +163,7 @@ def main() -> None:
                 n_layer=args.layers,
                 n_embd=args.embedding,
                 dropout=args.dropout,
+                model_type=args.model_type,
                 lif_threshold=args.lif_threshold,
                 spike_embedding=not args.dense_embedding,
                 gradient_checkpointing=args.activation_checkpointing,
@@ -166,6 +173,7 @@ def main() -> None:
                 args.preset,
                 vocab_size=vocabulary.size,
                 dropout=args.dropout,
+                model_type=args.model_type,
                 lif_threshold=args.lif_threshold,
                 spike_embedding=not args.dense_embedding,
                 gradient_checkpointing=args.activation_checkpointing,
@@ -194,7 +202,7 @@ def main() -> None:
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
-        f"vocab:{actual_vocab},preset:{args.preset},"
+        f"vocab:{actual_vocab},preset:{args.preset},model_type:{config.model_type},"
         f"context_length:{config.context_length},layers:{config.n_layer},"
         f"embedding:{config.n_embd},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},"
@@ -238,6 +246,7 @@ def main() -> None:
             "compile_policy": args.compile,
             "vocab": actual_vocab,
             "preset": args.preset,
+            "model_type": config.model_type,
             "context_length": config.context_length,
             "layers": config.n_layer,
             "embedding": config.n_embd,
@@ -384,6 +393,7 @@ def main() -> None:
             metadata={
                 "vocab": actual_vocab,
                 "preset": args.preset,
+                "model_type": config.model_type,
                 "steps": args.steps,
                 "previous_steps": previous_steps,
                 "total_steps": total_steps,
