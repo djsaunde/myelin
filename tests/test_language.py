@@ -231,6 +231,28 @@ def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
     assert torch.allclose(actual_logits, expected_logits)
 
 
+def test_spike_language_checkpoint_without_optimizer_loads_as_model_only(
+    tmp_path: Path,
+) -> None:
+    vocabulary = CharacterVocabulary.from_text("banana")
+    model = SpikeLanguageModel(
+        SpikeGPTConfig(
+            vocab_size=vocabulary.size,
+            context_length=4,
+            n_layer=1,
+            n_embd=8,
+            dropout=0.0,
+        )
+    )
+    path = tmp_path / "model_only.pt"
+
+    save_spike_language_checkpoint(path, model, vocabulary)
+    checkpoint = load_spike_language_checkpoint(path, map_location="cpu")
+
+    assert checkpoint.optimizer_state_dict is None
+    assert checkpoint.metadata == {}
+
+
 def test_spike_language_model_gradient_checkpointing_preserves_loss_and_gradients() -> None:
     torch.manual_seed(0)
     config = SpikeGPTConfig(
