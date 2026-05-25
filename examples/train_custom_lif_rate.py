@@ -11,9 +11,13 @@ from example_utils import (
     add_grad_clip_arg,
     add_matmul_precision_arg,
     add_surrogate_args,
+    add_wandb_args,
     clip_gradients,
     compile_training_model,
     configure_matmul_precision,
+    finish_wandb,
+    init_wandb,
+    log_wandb,
     print_model_summary,
     print_step_time_summary,
     resolve_compile_policy,
@@ -96,6 +100,7 @@ def train(
     compile_model: bool,
     seed: int,
     log_every: int,
+    wandb_run=None,
 ) -> tuple[list[tuple[int, float, float, float | None]], float]:
     torch.manual_seed(seed)
     inputs = torch.rand((timesteps, batch, features), device=device)
@@ -122,6 +127,11 @@ def train(
     history: list[tuple[int, float, float, float | None]] = [
         (0, *evaluate(model, loss_fn, inputs), None)
     ]
+    log_wandb(
+        wandb_run,
+        {"train/loss": history[0][1], "train/spike_rate": history[0][2]},
+        step=0,
+    )
     print("| Step | Loss | Spike Rate | Step ms |", flush=True)
     print("|---:|---:|---:|---:|", flush=True)
     print_history_row(history[0])
@@ -139,6 +149,15 @@ def train(
         synchronize_if_needed(device)
         step_seconds = time.perf_counter() - start
         history.append((step, *evaluate(model, loss_fn, inputs), step_seconds))
+        log_wandb(
+            wandb_run,
+            {
+                "train/loss": history[-1][1],
+                "train/spike_rate": history[-1][2],
+                "train/step_ms": step_seconds * 1000,
+            },
+            step=step,
+        )
         if step == steps or step % log_every == 0:
             print_history_row(history[-1])
     synchronize_if_needed(device)
@@ -166,9 +185,36 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-every", type=int, default=5)
     add_matmul_precision_arg(parser)
+    add_wandb_args(parser)
     args = parser.parse_args()
     configure_matmul_precision(args.matmul_precision)
     compile_model = resolve_compile_policy(args.compile, args.device)
+    config = {
+        "device": args.device,
+        "backend": args.backend,
+        "compile": compile_model,
+        "compile_policy": args.compile,
+        "timesteps": args.timesteps,
+        "batch": args.batch,
+        "features": args.features,
+        "neurons": args.neurons,
+        "target_rate": args.target_rate,
+        "steps": args.steps,
+        "lr": args.lr,
+        "grad_clip": args.grad_clip,
+        "checkpoint_size": args.checkpoint_size,
+        "matmul_precision": args.matmul_precision,
+        "surrogate_slope": args.surrogate_slope,
+        "hard_forward": not args.smooth_forward,
+        "seed": args.seed,
+        "model": "custom_lif_rate",
+    }
+    wandb_run = init_wandb(
+        enabled=args.wandb,
+        project=args.wandb_project,
+        run_name=args.wandb_run_name,
+        config=config,
+    )
 
     print(
         "config="
@@ -198,8 +244,10 @@ def main() -> None:
         compile_model=compile_model,
         seed=args.seed,
         log_every=args.log_every,
+        wandb_run=wandb_run,
     )
     print_summary(history, target_rate=args.target_rate, total_seconds=total_seconds)
+    finish_wandb(wandb_run)
 
 
 if __name__ == "__main__":

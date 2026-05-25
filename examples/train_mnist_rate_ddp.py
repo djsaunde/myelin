@@ -17,9 +17,13 @@ from example_utils import (
     add_grad_clip_arg,
     add_matmul_precision_arg,
     add_surrogate_args,
+    add_wandb_args,
     clip_gradients,
     compile_training_model,
     configure_matmul_precision,
+    finish_wandb,
+    init_wandb,
+    log_wandb,
     print_cuda_peak_memory_summary,
     print_model_summary,
     print_step_time_summary,
@@ -143,6 +147,7 @@ def main() -> None:
     parser.add_argument("--test-limit", type=int)
     parser.add_argument("--num-workers", type=int, default=2)
     add_matmul_precision_arg(parser)
+    add_wandb_args(parser)
     args = parser.parse_args()
 
     configure_matmul_precision(args.matmul_precision)
@@ -200,6 +205,41 @@ def main() -> None:
         )
         train_examples = len(cast(Sized, train_data))
         test_examples = len(cast(Sized, test_data))
+        config = {
+            "distributed": "ddp",
+            "rank": rank,
+            "local_rank": local_rank,
+            "world_size": world_size,
+            "device": device,
+            "compile": compile_model,
+            "compile_policy": args.compile,
+            "timesteps": args.timesteps,
+            "encoding": args.encoding,
+            "batch_per_rank": args.batch,
+            "hidden": args.hidden,
+            "epochs": args.epochs,
+            "lr": args.lr,
+            "dropout": args.dropout,
+            "label_smoothing": args.label_smoothing,
+            "grad_clip": args.grad_clip,
+            "matmul_precision": args.matmul_precision,
+            "surrogate_slope": args.surrogate_slope,
+            "hard_forward": not args.smooth_forward,
+            "backend": args.backend,
+            "resolved_backend": resolved_backend,
+            "checkpoint_size": args.checkpoint_size,
+            "resolved_checkpoint_size": resolved_checkpoint_size,
+            "seed": args.seed,
+            "train_examples": train_examples,
+            "test_examples": test_examples,
+            "model": "rate_readout_mnist_snn",
+        }
+        wandb_run = init_wandb(
+            enabled=args.wandb and is_rank0(rank),
+            project=args.wandb_project,
+            run_name=args.wandb_run_name,
+            config=config,
+        )
 
         if is_rank0(rank):
             print(
@@ -297,6 +337,16 @@ def main() -> None:
                     if evaluated_loss is not None and evaluated_acc is not None:
                         val_loss = f"{evaluated_loss:.6f}"
                         val_acc = f"{evaluated_acc:.4f}"
+                    wandb_metrics = {
+                        "train/loss": float(loss.detach()),
+                        "train/accuracy": train_acc,
+                        "train/step_ms": step_seconds * 1000,
+                    }
+                    if evaluated_loss is not None and evaluated_acc is not None:
+                        wandb_metrics.update(
+                            {"val/loss": evaluated_loss, "val/accuracy": evaluated_acc}
+                        )
+                    log_wandb(wandb_run, wandb_metrics, step=global_step)
                     print(
                         f"| {global_step} | {epoch} | {float(loss.detach()):.6f} | "
                         f"{train_acc:.4f} | {val_loss} | {val_acc} | "
@@ -324,6 +374,7 @@ def main() -> None:
             print(f"total_training_seconds={total_seconds:.3f}", flush=True)
             print_cuda_peak_memory_summary(device)
             print_step_time_summary(step_times)
+            finish_wandb(wandb_run)
     finally:
         cleanup_distributed(distributed)
 
