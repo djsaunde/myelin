@@ -26,6 +26,7 @@ from example_utils import (
     log_wandb,
     print_cuda_peak_memory_summary,
     print_model_summary,
+    print_resident_memory_summary,
     print_step_time_summary,
     reset_cuda_peak_memory,
     resolve_compile_policy,
@@ -318,6 +319,8 @@ def main() -> None:
         if is_rank0(rank):
             print_model_summary(model)
             print()
+            print_resident_memory_summary(model)
+            print()
 
         model = compile_training_model(model, compile_model)
         if distributed:
@@ -419,6 +422,7 @@ def main() -> None:
             print(f"final_test_accuracy={final_acc:.4f}", flush=True)
             print(f"total_training_seconds={total_seconds:.3f}", flush=True)
             print_cuda_peak_memory_summary(device)
+            print_resident_memory_summary(model, optimizer)
             print_step_time_summary(step_times)
             finish_wandb(wandb_run)
     finally:

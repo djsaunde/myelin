@@ -31,6 +31,53 @@ def print_model_summary(model: torch.nn.Module) -> None:
     print(f"trainable_params={trainable_params}", flush=True)
 
 
+def _local_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    to_local = getattr(tensor, "to_local", None)
+    if to_local is None:
+        return tensor
+    return cast(torch.Tensor, to_local())
+
+
+def _tensor_memory_mb(tensor: torch.Tensor) -> float:
+    return tensor.numel() * tensor.element_size() / (1024 * 1024)
+
+
+def _local_tensor_memory_mb(tensor: torch.Tensor) -> float:
+    return _tensor_memory_mb(_local_tensor(tensor))
+
+
+def print_resident_memory_summary(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer | None = None,
+) -> None:
+    parameter_mb = sum(_tensor_memory_mb(parameter) for parameter in model.parameters())
+    local_parameter_mb = sum(_local_tensor_memory_mb(parameter) for parameter in model.parameters())
+    trainable_parameter_mb = sum(
+        _tensor_memory_mb(parameter) for parameter in model.parameters() if parameter.requires_grad
+    )
+    local_trainable_parameter_mb = sum(
+        _local_tensor_memory_mb(parameter)
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+    print(f"parameter_memory_mb={parameter_mb:.3f}", flush=True)
+    print(f"local_parameter_memory_mb={local_parameter_mb:.3f}", flush=True)
+    print(f"trainable_parameter_memory_mb={trainable_parameter_mb:.3f}", flush=True)
+    print(f"local_trainable_parameter_memory_mb={local_trainable_parameter_mb:.3f}", flush=True)
+
+    if optimizer is None:
+        return
+    optimizer_state_mb = 0.0
+    local_optimizer_state_mb = 0.0
+    for state in optimizer.state.values():
+        for value in state.values():
+            if isinstance(value, torch.Tensor):
+                optimizer_state_mb += _tensor_memory_mb(value)
+                local_optimizer_state_mb += _local_tensor_memory_mb(value)
+    print(f"optimizer_state_memory_mb={optimizer_state_mb:.3f}", flush=True)
+    print(f"local_optimizer_state_memory_mb={local_optimizer_state_mb:.3f}", flush=True)
+
+
 def print_step_time_summary(step_times: list[float]) -> None:
     if step_times:
         average_step_ms = sum(step_times) / len(step_times) * 1000

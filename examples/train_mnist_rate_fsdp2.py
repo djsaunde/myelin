@@ -26,6 +26,7 @@ from example_utils import (
     log_wandb,
     print_cuda_peak_memory_summary,
     print_model_summary,
+    print_resident_memory_summary,
     print_step_time_summary,
     reset_cuda_peak_memory,
     resolve_compile_policy,
@@ -137,7 +138,7 @@ def apply_fsdp2(model: nn.Module, *, device: str, distributed: bool) -> nn.Modul
         (dist.get_world_size(),),
         mesh_dim_names=("dp",),
     )
-    sharded = fully_shard(model, mesh=mesh)
+    sharded = fully_shard(model, mesh=mesh, reshard_after_forward=True)
     return model if sharded is None else cast(nn.Module, sharded)
 
 
@@ -331,8 +332,13 @@ def main() -> None:
         if is_rank0(rank):
             print_model_summary(model)
             print()
+            print_resident_memory_summary(model)
+            print()
 
         model = apply_fsdp2(model, device=device, distributed=distributed)
+        if is_rank0(rank):
+            print_resident_memory_summary(model)
+            print()
         model = compile_training_model(model, compile_model)
 
         loss_fn = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
@@ -428,6 +434,7 @@ def main() -> None:
             print(f"final_test_accuracy={final_acc:.4f}", flush=True)
             print(f"total_training_seconds={total_seconds:.3f}", flush=True)
             print_cuda_peak_memory_summary(device)
+            print_resident_memory_summary(model, optimizer)
             print_step_time_summary(step_times)
             finish_wandb(wandb_run)
     finally:
