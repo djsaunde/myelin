@@ -119,6 +119,7 @@ def test_spikegpt_config_serialization_round_trips() -> None:
         n_layer=2,
         n_embd=32,
         dropout=0.1,
+        model_type="rwkv-ffn-pre",
         lif_threshold=0.0,
         spike_embedding=False,
         gradient_checkpointing=True,
