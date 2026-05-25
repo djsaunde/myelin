@@ -208,6 +208,14 @@ def main() -> None:
 
     model = compile_training_model(raw_model, compile_model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer_loaded = False
+    if checkpoint is not None and checkpoint.optimizer_state_dict is not None:
+        optimizer.load_state_dict(checkpoint.optimizer_state_dict)
+        optimizer_loaded = True
+        for group in optimizer.param_groups:
+            group["lr"] = args.lr
+            group["weight_decay"] = args.weight_decay
+        print("optimizer_loaded=True", flush=True)
     wandb_run = init_wandb(
         enabled=args.wandb,
         project=args.wandb_project,
@@ -235,6 +243,7 @@ def main() -> None:
             "train_tokens": train_tokens.numel(),
             "val_tokens": val_tokens.numel(),
             "checkpoint_in": "" if args.checkpoint_in is None else str(args.checkpoint_in),
+            "optimizer_loaded": optimizer_loaded,
         },
     )
     step_times: list[float] = []
@@ -369,6 +378,7 @@ def main() -> None:
                 "train_tokens": train_tokens.numel(),
                 "val_tokens": val_tokens.numel(),
             },
+            optimizer=optimizer,
         )
         print(f"checkpoint={args.checkpoint_out}", flush=True)
 

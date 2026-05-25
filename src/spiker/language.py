@@ -100,6 +100,7 @@ class SpikeLanguageCheckpoint:
     model: SpikeLanguageModel
     vocabulary: CharacterVocabulary | ByteVocabulary
     metadata: dict[str, object]
+    optimizer_state_dict: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1058,6 +1059,7 @@ def save_spike_language_checkpoint(
     vocabulary: LanguageVocabulary,
     *,
     metadata: Mapping[str, object] | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
 ) -> None:
     """Save a SpikeGPT-style model, config, vocabulary, and metadata."""
 
@@ -1068,6 +1070,8 @@ def save_spike_language_checkpoint(
         "state_dict": model.state_dict(),
         "metadata": dict(metadata or {}),
     }
+    if optimizer is not None:
+        payload["optimizer_state_dict"] = optimizer.state_dict()
     torch.save(payload, path)
 
 
@@ -1093,4 +1097,15 @@ def load_spike_language_checkpoint(
     model = SpikeLanguageModel(config)
     model.load_state_dict(cast(Mapping[str, Any], raw_state_dict))
     metadata = dict(_require_mapping(payload.get("metadata", {}), "metadata"))
-    return SpikeLanguageCheckpoint(model=model, vocabulary=vocabulary, metadata=metadata)
+    raw_optimizer_state = payload.get("optimizer_state_dict")
+    optimizer_state_dict = (
+        None
+        if raw_optimizer_state is None
+        else dict(_require_mapping(raw_optimizer_state, "optimizer_state_dict"))
+    )
+    return SpikeLanguageCheckpoint(
+        model=model,
+        vocabulary=vocabulary,
+        metadata=metadata,
+        optimizer_state_dict=optimizer_state_dict,
+    )

@@ -203,6 +203,11 @@ def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
     )
     model = SpikeLanguageModel(config)
     input_ids = vocabulary.encode("bana").unsqueeze(0)
+    targets = vocabulary.encode("anan").unsqueeze(0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1.0e-3)
+    loss, _logits = model(input_ids, targets)
+    loss.backward()
+    optimizer.step()
     expected_logits = model(input_ids)
     path = tmp_path / "spikegpt.pt"
 
@@ -211,6 +216,7 @@ def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
         model,
         vocabulary,
         metadata={"steps": 3, "note": "unit"},
+        optimizer=optimizer,
     )
     checkpoint = load_spike_language_checkpoint(path, map_location="cpu")
     actual_logits = checkpoint.model(input_ids)
@@ -219,6 +225,8 @@ def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
     assert isinstance(checkpoint.vocabulary, CharacterVocabulary)
     assert checkpoint.vocabulary.tokens == vocabulary.tokens
     assert checkpoint.metadata == {"steps": 3, "note": "unit"}
+    assert checkpoint.optimizer_state_dict is not None
+    assert checkpoint.optimizer_state_dict["state"]
     assert torch.allclose(actual_logits, expected_logits)
 
 

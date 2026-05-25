@@ -345,6 +345,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
     )
 
     assert "checkpoint_loaded=" in resumed.stdout
+    assert "optimizer_loaded=True" in resumed.stdout
     assert "vocab:byte" in resumed.stdout
     assert "context_length:8,layers:1,embedding:8" in resumed.stdout
 
