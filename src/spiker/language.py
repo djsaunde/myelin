@@ -20,6 +20,7 @@ from torch.utils.checkpoint import checkpoint
 from spiker.surrogates import SurrogateFn, atan_surrogate, hard_surrogate_spike
 
 SpikeGPTModelType = Literal["rwkv", "rwkv-ffn-pre"]
+SpikeGPTPreset = Literal["micro", "tiny", "small", "base"]
 SamplingMode = Literal["multinomial", "greedy"]
 
 
@@ -159,6 +160,55 @@ class SpikeGPTConfig:
             raise ValueError("dropout must be in [0, 1)")
         if self.lif_tau <= 0.0:
             raise ValueError("lif_tau must be positive")
+
+
+@dataclass(frozen=True)
+class SpikeGPTPresetSpec:
+    """Named SpikeGPT model dimensions for reproducible experiments."""
+
+    context_length: int
+    n_layer: int
+    n_embd: int
+
+
+SPIKEGPT_PRESETS: dict[SpikeGPTPreset, SpikeGPTPresetSpec] = {
+    "micro": SpikeGPTPresetSpec(context_length=32, n_layer=1, n_embd=32),
+    "tiny": SpikeGPTPresetSpec(context_length=64, n_layer=2, n_embd=64),
+    "small": SpikeGPTPresetSpec(context_length=128, n_layer=4, n_embd=128),
+    "base": SpikeGPTPresetSpec(context_length=256, n_layer=6, n_embd=256),
+}
+
+
+def spikegpt_config_from_preset(
+    preset: SpikeGPTPreset,
+    *,
+    vocab_size: int,
+    dropout: float = 0.03,
+    model_type: SpikeGPTModelType = "rwkv",
+    lif_tau: float = 2.0,
+    lif_threshold: float = 1.0,
+    lif_reset: float = 0.0,
+    surrogate_slope: float = 2.0,
+    spike_embedding: bool = True,
+    gradient_checkpointing: bool = False,
+) -> SpikeGPTConfig:
+    """Create a ``SpikeGPTConfig`` from a named model-size preset."""
+
+    spec = SPIKEGPT_PRESETS[preset]
+    return SpikeGPTConfig(
+        vocab_size=vocab_size,
+        context_length=spec.context_length,
+        n_layer=spec.n_layer,
+        n_embd=spec.n_embd,
+        dropout=dropout,
+        model_type=model_type,
+        lif_tau=lif_tau,
+        lif_threshold=lif_threshold,
+        lif_reset=lif_reset,
+        surrogate_slope=surrogate_slope,
+        spike_embedding=spike_embedding,
+        gradient_checkpointing=gradient_checkpointing,
+    )
 
 
 def _time_shift(inputs: torch.Tensor) -> torch.Tensor:

@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from spiker import (
+    SPIKEGPT_PRESETS,
     ByteVocabulary,
     CharacterVocabulary,
     SpikeGPTConfig,
@@ -11,6 +12,7 @@ from spiker import (
     SpikingSequenceLIF,
     evaluate_language_model,
     sample_token_batch,
+    spikegpt_config_from_preset,
     split_token_sequence,
     weighted_key_value,
 )
@@ -61,6 +63,27 @@ def test_byte_vocabulary_round_trips_utf8_and_has_fixed_size() -> None:
     assert encoded.dtype == torch.long
     assert encoded.max() < vocab.size
     assert vocab.decode(encoded) == text
+
+
+def test_spikegpt_config_from_preset_uses_named_dimensions() -> None:
+    config = spikegpt_config_from_preset(
+        "tiny",
+        vocab_size=257,
+        dropout=0.1,
+        lif_threshold=0.0,
+        spike_embedding=False,
+        gradient_checkpointing=True,
+    )
+
+    assert set(SPIKEGPT_PRESETS) == {"micro", "tiny", "small", "base"}
+    assert config.vocab_size == 257
+    assert config.context_length == SPIKEGPT_PRESETS["tiny"].context_length
+    assert config.n_layer == SPIKEGPT_PRESETS["tiny"].n_layer
+    assert config.n_embd == SPIKEGPT_PRESETS["tiny"].n_embd
+    assert config.dropout == 0.1
+    assert config.lif_threshold == 0.0
+    assert not config.spike_embedding
+    assert config.gradient_checkpointing
 
 
 def test_split_token_sequence_and_sample_batch() -> None:

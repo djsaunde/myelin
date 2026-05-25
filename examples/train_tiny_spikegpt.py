@@ -24,12 +24,14 @@ from example_utils import (
 )
 
 from spiker import (
+    SPIKEGPT_PRESETS,
     ByteVocabulary,
     CharacterVocabulary,
     SpikeGPTConfig,
     SpikeLanguageModel,
     evaluate_language_model,
     sample_token_batch,
+    spikegpt_config_from_preset,
     split_token_sequence,
 )
 
@@ -52,6 +54,12 @@ def main() -> None:
     )
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--min-val-tokens", type=int, default=64)
+    parser.add_argument(
+        "--preset",
+        choices=("custom", *SPIKEGPT_PRESETS.keys()),
+        default="custom",
+        help="named SpikeGPT size preset; custom uses --context-length/--layers/--embedding",
+    )
     parser.add_argument("--context-length", type=int, default=32)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--embedding", type=int, default=64)
@@ -114,23 +122,35 @@ def main() -> None:
         validation_fraction=args.val_fraction,
         min_validation_tokens=args.min_val_tokens,
     )
-    config = SpikeGPTConfig(
-        vocab_size=vocabulary.size,
-        context_length=args.context_length,
-        n_layer=args.layers,
-        n_embd=args.embedding,
-        dropout=args.dropout,
-        lif_threshold=args.lif_threshold,
-        spike_embedding=not args.dense_embedding,
-        gradient_checkpointing=args.activation_checkpointing,
+    config = (
+        SpikeGPTConfig(
+            vocab_size=vocabulary.size,
+            context_length=args.context_length,
+            n_layer=args.layers,
+            n_embd=args.embedding,
+            dropout=args.dropout,
+            lif_threshold=args.lif_threshold,
+            spike_embedding=not args.dense_embedding,
+            gradient_checkpointing=args.activation_checkpointing,
+        )
+        if args.preset == "custom"
+        else spikegpt_config_from_preset(
+            args.preset,
+            vocab_size=vocabulary.size,
+            dropout=args.dropout,
+            lif_threshold=args.lif_threshold,
+            spike_embedding=not args.dense_embedding,
+            gradient_checkpointing=args.activation_checkpointing,
+        )
     )
     compile_model = resolve_compile_policy(args.compile, args.device)
     raw_model = SpikeLanguageModel(config).to(device=args.device)
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
-        f"vocab:{args.vocab},"
-        f"context_length:{args.context_length},layers:{args.layers},embedding:{args.embedding},"
+        f"vocab:{args.vocab},preset:{args.preset},"
+        f"context_length:{config.context_length},layers:{config.n_layer},"
+        f"embedding:{config.n_embd},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},"
         f"weight_decay:{args.weight_decay},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"
@@ -157,9 +177,10 @@ def main() -> None:
             "compile": compile_model,
             "compile_policy": args.compile,
             "vocab": args.vocab,
-            "context_length": args.context_length,
-            "layers": args.layers,
-            "embedding": args.embedding,
+            "preset": args.preset,
+            "context_length": config.context_length,
+            "layers": config.n_layer,
+            "embedding": config.n_embd,
             "batch": args.batch,
             "steps": args.steps,
             "lr": args.lr,
@@ -191,7 +212,7 @@ def main() -> None:
             warmup_inputs, warmup_targets = sample_token_batch(
                 train_tokens,
                 batch_size=args.batch,
-                context_length=args.context_length,
+                context_length=config.context_length,
                 device=args.device,
             )
             if torch_device.type == "cuda":
@@ -227,7 +248,7 @@ def main() -> None:
             inputs, targets = sample_token_batch(
                 train_tokens,
                 batch_size=args.batch,
-                context_length=args.context_length,
+                context_length=config.context_length,
                 device=args.device,
             )
             if torch_device.type == "cuda":
@@ -253,7 +274,7 @@ def main() -> None:
                         raw_model,
                         val_tokens,
                         batch_size=args.batch,
-                        context_length=args.context_length,
+                        context_length=config.context_length,
                         device=args.device,
                         batches=args.eval_batches,
                     )
