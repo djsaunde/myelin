@@ -150,7 +150,8 @@ def print_markdown(args: argparse.Namespace, rows: list[CompileProbeRow]) -> Non
     print(
         "Shape: "
         f"batch={args.batch}, preset={args.preset}, context_length={config.context_length}, "
-        f"layers={config.n_layer}, embedding={config.n_embd}, vocab_size={args.vocab_size}"
+        f"layers={config.n_layer}, embedding={config.n_embd}, model_type={config.model_type}, "
+        f"vocab_size={args.vocab_size}"
     )
     print(
         f"compile_mode={args.compile_mode}; fullgraph={args.fullgraph}; "
@@ -175,6 +176,7 @@ def main() -> None:
     parser.add_argument("--context-length", type=int, default=8)
     parser.add_argument("--layers", type=int, default=1)
     parser.add_argument("--embedding", type=int, default=16)
+    parser.add_argument("--model-type", choices=("rwkv", "rwkv-ffn-pre"), default="rwkv")
     parser.add_argument("--vocab-size", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--lif-threshold", type=float, default=0.0)

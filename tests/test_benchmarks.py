@@ -68,6 +68,12 @@ from spiker.benchmarks.snntorch_matrix import (
 from spiker.benchmarks.snntorch_matrix import (
     run_matrix as run_snntorch_matrix,
 )
+from spiker.benchmarks.spikegpt_compile_probe import (
+    CompileProbeRow,
+)
+from spiker.benchmarks.spikegpt_compile_probe import (
+    print_markdown as print_spikegpt_compile_probe_markdown,
+)
 from spiker.benchmarks.spikegpt_generation import run_benchmark as run_spikegpt_generation
 from spiker.benchmarks.spikegpt_training import run_benchmark as run_spikegpt_training
 from spiker.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
@@ -1049,6 +1055,34 @@ def test_spikegpt_training_benchmark_smoke() -> None:
     assert rows[0].tokens_per_second is not None
     assert rows[0].tokens_per_second > 0
     assert rows[0].loss is not None
+
+
+def test_spikegpt_compile_probe_markdown_reports_model_type(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    print_spikegpt_compile_probe_markdown(
+        argparse.Namespace(
+            device="cpu",
+            batch=1,
+            preset="custom",
+            context_length=4,
+            layers=1,
+            embedding=8,
+            model_type="rwkv-ffn-pre",
+            vocab_size=16,
+            dropout=0.0,
+            lif_threshold=0.0,
+            dense_embedding=False,
+            compile_mode="reduce-overhead",
+            fullgraph=True,
+            matmul_precision="high",
+            repeats=1,
+            seed=0,
+        ),
+        [CompileProbeRow("eager_first_step", 0.001, None, 1.0)],
+    )
+
+    assert "model_type=rwkv-ffn-pre" in capsys.readouterr().out
 
 
 def test_distributed_collectives_benchmark_smoke() -> None:
