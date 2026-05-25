@@ -200,6 +200,32 @@ def test_spike_language_model_returns_logits_loss_and_spike_rates() -> None:
     assert "blocks.0.channel" in rates
 
 
+def test_spike_language_model_ffn_pre_variant_runs_and_backpropagates() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=11,
+        context_length=8,
+        n_layer=2,
+        n_embd=16,
+        dropout=0.0,
+        model_type="rwkv-ffn-pre",
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    input_ids = torch.randint(0, config.vocab_size, (3, config.context_length))
+    targets = torch.randint(0, config.vocab_size, (3, config.context_length))
+
+    loss, logits = model(input_ids, targets)
+    loss.backward()
+    first_state = model.initial_state(batch_size=input_ids.shape[0]).blocks[0]
+
+    assert logits.shape == (3, config.context_length, config.vocab_size)
+    assert loss.ndim == 0
+    assert model.embedding.weight.grad is not None
+    assert first_state.time_mix is None
+    assert first_state.ffn_pre is not None
+
+
 def test_spike_language_checkpoint_round_trips_model_vocab_and_metadata(
     tmp_path: Path,
 ) -> None:
@@ -351,6 +377,26 @@ def test_cached_and_uncached_greedy_generation_match_within_context_window() -> 
         n_layer=1,
         n_embd=8,
         dropout=0.0,
+        lif_threshold=0.0,
+    )
+    model = SpikeLanguageModel(config)
+    input_ids = torch.tensor([[0, 1, 2]])
+
+    cached = model.generate(input_ids, max_new_tokens=3, sampling="greedy", use_cache=True)
+    uncached = model.generate(input_ids, max_new_tokens=3, sampling="greedy", use_cache=False)
+
+    assert torch.equal(cached, uncached)
+
+
+def test_ffn_pre_cached_and_uncached_greedy_generation_match() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=7,
+        context_length=8,
+        n_layer=2,
+        n_embd=8,
+        dropout=0.0,
+        model_type="rwkv-ffn-pre",
         lif_threshold=0.0,
     )
     model = SpikeLanguageModel(config)
