@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from pathlib import Path
 
 import torch
 from example_utils import (
@@ -16,7 +17,14 @@ from example_utils import (
     resolve_compile_policy,
 )
 
-from spiker import SpikeGPTConfig, SpikeLanguageModel
+from spiker import (
+    CharacterVocabulary,
+    SpikeGPTConfig,
+    SpikeLanguageModel,
+    evaluate_language_model,
+    sample_token_batch,
+    split_token_sequence,
+)
 
 DEFAULT_TEXT = (
     "spiking neural networks trade dense activations for sparse events. "
@@ -24,37 +32,13 @@ DEFAULT_TEXT = (
 )
 
 
-def encode_text(text: str) -> tuple[torch.Tensor, dict[str, int], list[str]]:
-    vocab = sorted(set(text))
-    stoi = {char: index for index, char in enumerate(vocab)}
-    encoded = torch.tensor([stoi[char] for char in text], dtype=torch.long)
-    return encoded, stoi, vocab
-
-
-def decode_tokens(tokens: torch.Tensor, vocab: list[str]) -> str:
-    return "".join(vocab[index] for index in tokens.tolist())
-
-
-def sample_batch(
-    tokens: torch.Tensor,
-    *,
-    batch_size: int,
-    context_length: int,
-    device: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    max_start = tokens.numel() - context_length - 1
-    if max_start <= 0:
-        raise ValueError("text is too short for the requested context length")
-    starts = torch.randint(0, max_start, (batch_size,))
-    inputs = torch.stack([tokens[start : start + context_length] for start in starts])
-    targets = torch.stack([tokens[start + 1 : start + context_length + 1] for start in starts])
-    return inputs.to(device=device), targets.to(device=device)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--text", default=DEFAULT_TEXT)
+    parser.add_argument("--text-file", type=Path)
+    parser.add_argument("--val-fraction", type=float, default=0.1)
+    parser.add_argument("--min-val-tokens", type=int, default=64)
     parser.add_argument("--context-length", type=int, default=32)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--embedding", type=int, default=64)
@@ -72,6 +56,8 @@ def main() -> None:
         ),
     )
     parser.add_argument("--log-every", type=int, default=10)
+    parser.add_argument("--eval-every", type=int, default=25)
+    parser.add_argument("--eval-batches", type=int, default=8)
     parser.add_argument("--sample-prompt", default="spik")
     parser.add_argument("--sample-tokens", type=int, default=48)
     parser.add_argument("--seed", type=int, default=0)
@@ -86,9 +72,16 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     configure_matmul_precision(args.matmul_precision)
-    tokens, _stoi, vocab = encode_text(args.text)
+    text = args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
+    vocabulary = CharacterVocabulary.from_text(text)
+    tokens = vocabulary.encode(text)
+    train_tokens, val_tokens = split_token_sequence(
+        tokens,
+        validation_fraction=args.val_fraction,
+        min_validation_tokens=args.min_val_tokens,
+    )
     config = SpikeGPTConfig(
-        vocab_size=len(vocab),
+        vocab_size=vocabulary.size,
         context_length=args.context_length,
         n_layer=args.layers,
         n_embd=args.embedding,
@@ -104,7 +97,8 @@ def main() -> None:
         f"context_length:{args.context_length},layers:{args.layers},embedding:{args.embedding},"
         f"batch:{args.batch},steps:{args.steps},lr:{args.lr},dropout:{args.dropout},"
         f"lif_threshold:{args.lif_threshold},"
-        f"spike_embedding:{not args.dense_embedding},vocab_size:{len(vocab)}",
+        f"spike_embedding:{not args.dense_embedding},vocab_size:{vocabulary.size},"
+        f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()}",
         flush=True,
     )
     print()
@@ -115,13 +109,17 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     step_times: list[float] = []
 
-    print("| Step | Loss | Emb Spike Rate | Mean Block Spike Rate | Step ms |", flush=True)
-    print("|---:|---:|---:|---:|---:|", flush=True)
+    print(
+        "| Step | Train Loss | Val Loss | Val BPC | Val PPL | "
+        "Emb Spike Rate | Mean Block Spike Rate | Step ms |",
+        flush=True,
+    )
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|", flush=True)
 
     model.train()
     for step in range(1, args.steps + 1):
-        inputs, targets = sample_batch(
-            tokens,
+        inputs, targets = sample_token_batch(
+            train_tokens,
             batch_size=args.batch,
             context_length=args.context_length,
             device=args.device,
@@ -143,8 +141,21 @@ def main() -> None:
             rates = raw_model.spike_rates(inputs)
             block_rates = [value for key, value in rates.items() if key != "embedding"]
             mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
+            eval_metrics = None
+            if step == 1 or step % args.eval_every == 0 or step == args.steps:
+                eval_metrics = evaluate_language_model(
+                    raw_model,
+                    val_tokens,
+                    batch_size=args.batch,
+                    context_length=args.context_length,
+                    device=args.device,
+                    batches=args.eval_batches,
+                )
             print(
                 f"| {step} | {float(loss.detach()):.6f} | "
+                f"{'' if eval_metrics is None else f'{eval_metrics.loss:.6f}'} | "
+                f"{'' if eval_metrics is None else f'{eval_metrics.bits_per_character:.4f}'} | "
+                f"{'' if eval_metrics is None else f'{eval_metrics.perplexity:.4f}'} | "
                 f"{rates['embedding']:.4f} | {mean_block_rate:.4f} | "
                 f"{step_seconds * 1000:.3f} |",
                 flush=True,
@@ -153,23 +164,22 @@ def main() -> None:
     print()
     print_step_time_summary(step_times)
     prompt = args.sample_prompt
-    missing_chars = sorted(set(prompt) - set(vocab))
-    if missing_chars:
+    try:
+        prompt_token_ids = vocabulary.encode(prompt)
+    except ValueError as exc:
         print(
-            f"sample_skipped=prompt contains out-of-vocabulary chars: {missing_chars}", flush=True
+            f"sample_skipped={exc}",
+            flush=True,
         )
         return
-    stoi = {char: index for index, char in enumerate(vocab)}
-    prompt_tokens = torch.tensor(
-        [[stoi[char] for char in prompt]], dtype=torch.long, device=args.device
-    )
+    prompt_tokens = prompt_token_ids.unsqueeze(0).to(device=args.device)
     generated = raw_model.generate(
         prompt_tokens,
         max_new_tokens=args.sample_tokens,
-        top_k=min(8, len(vocab)),
+        top_k=min(8, vocabulary.size),
         sampling="greedy",
     )
-    print(f"sample={decode_tokens(generated[0].cpu(), vocab)!r}", flush=True)
+    print(f"sample={vocabulary.decode(generated[0].cpu())!r}", flush=True)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,46 @@ SamplingMode = Literal["multinomial", "greedy"]
 
 
 @dataclass(frozen=True)
+class CharacterVocabulary:
+    """Stable character-level vocabulary for tiny SpikeGPT-style experiments."""
+
+    tokens: tuple[str, ...]
+
+    @classmethod
+    def from_text(cls, text: str) -> CharacterVocabulary:
+        if not text:
+            raise ValueError("text must not be empty")
+        return cls(tuple(sorted(set(text))))
+
+    @property
+    def size(self) -> int:
+        return len(self.tokens)
+
+    @property
+    def token_to_id(self) -> dict[str, int]:
+        return {token: index for index, token in enumerate(self.tokens)}
+
+    def encode(self, text: str) -> torch.Tensor:
+        token_to_id = self.token_to_id
+        missing = sorted(set(text) - set(token_to_id))
+        if missing:
+            raise ValueError(f"text contains out-of-vocabulary characters: {missing}")
+        return torch.tensor([token_to_id[token] for token in text], dtype=torch.long)
+
+    def decode(self, token_ids: torch.Tensor) -> str:
+        return "".join(self.tokens[index] for index in token_ids.tolist())
+
+
+@dataclass(frozen=True)
+class LanguageEval:
+    """Evaluation metrics for autoregressive character language modeling."""
+
+    loss: float
+    bits_per_character: float
+    perplexity: float
+
+
+@dataclass(frozen=True)
 class SpikeGPTConfig:
     """Configuration for a compact SpikeGPT-style recurrent language model."""
 
@@ -126,6 +166,94 @@ def weighted_key_value(
         log_scale = next_log_scale
 
     return torch.stack(outputs, dim=1)
+
+
+def split_token_sequence(
+    tokens: torch.Tensor,
+    *,
+    validation_fraction: float,
+    min_validation_tokens: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split a one-dimensional token sequence into train and validation tails."""
+
+    if tokens.ndim != 1:
+        raise ValueError(f"tokens must be one-dimensional; got {tokens.shape}")
+    if tokens.numel() < 3:
+        raise ValueError("tokens must contain at least 3 elements")
+    if validation_fraction < 0.0 or validation_fraction >= 1.0:
+        raise ValueError("validation_fraction must be in [0, 1)")
+    if min_validation_tokens < 0:
+        raise ValueError("min_validation_tokens must be non-negative")
+
+    validation_count = max(min_validation_tokens, int(tokens.numel() * validation_fraction))
+    validation_count = min(validation_count, tokens.numel() - 2)
+    if validation_count == 0:
+        return tokens, tokens
+    return tokens[:-validation_count], tokens[-validation_count:]
+
+
+def sample_token_batch(
+    tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    context_length: int,
+    device: str | torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample random next-token prediction windows from a token sequence."""
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if context_length <= 0:
+        raise ValueError("context_length must be positive")
+    max_start = tokens.numel() - context_length - 1
+    if max_start <= 0:
+        raise ValueError("tokens are too short for the requested context length")
+    starts = torch.randint(0, max_start, (batch_size,))
+    inputs = torch.stack([tokens[start : start + context_length] for start in starts])
+    targets = torch.stack([tokens[start + 1 : start + context_length + 1] for start in starts])
+    return inputs.to(device=device), targets.to(device=device)
+
+
+@torch.no_grad()
+def evaluate_language_model(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    context_length: int,
+    device: str | torch.device,
+    batches: int,
+) -> LanguageEval:
+    """Evaluate random language-model windows and report loss, BPC, and perplexity."""
+
+    if batches <= 0:
+        raise ValueError("batches must be positive")
+    was_training = model.training
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    loss_fn = nn.CrossEntropyLoss(reduction="sum")
+    for _ in range(batches):
+        inputs, targets = sample_token_batch(
+            tokens,
+            batch_size=batch_size,
+            context_length=context_length,
+            device=device,
+        )
+        logits = model(inputs)
+        if not isinstance(logits, torch.Tensor):
+            raise RuntimeError("evaluate_language_model expected logits-only model output")
+        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+        total_loss += float(loss)
+        total_tokens += targets.numel()
+    if was_training:
+        model.train()
+    mean_loss = total_loss / total_tokens
+    return LanguageEval(
+        loss=mean_loss,
+        bits_per_character=mean_loss / 0.6931471805599453,
+        perplexity=float(torch.exp(torch.tensor(mean_loss))),
+    )
 
 
 class SpikingSequenceLIF(nn.Module):

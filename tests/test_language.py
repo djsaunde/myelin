@@ -4,9 +4,13 @@ import pytest
 import torch
 
 from spiker import (
+    CharacterVocabulary,
     SpikeGPTConfig,
     SpikeLanguageModel,
     SpikingSequenceLIF,
+    evaluate_language_model,
+    sample_token_batch,
+    split_token_sequence,
     weighted_key_value,
 )
 
@@ -35,6 +39,37 @@ def test_weighted_key_value_rejects_bad_shapes() -> None:
 
     with pytest.raises(ValueError, match="same shape"):
         weighted_key_value(key, value, torch.zeros(3), torch.zeros(3))
+
+
+def test_character_vocabulary_round_trips_and_rejects_unknown_chars() -> None:
+    vocab = CharacterVocabulary.from_text("banana")
+    encoded = vocab.encode("nab")
+
+    assert vocab.size == 3
+    assert vocab.decode(encoded) == "nab"
+    with pytest.raises(ValueError, match="out-of-vocabulary"):
+        vocab.encode("band")
+
+
+def test_split_token_sequence_and_sample_batch() -> None:
+    tokens = torch.arange(20)
+
+    train_tokens, val_tokens = split_token_sequence(
+        tokens,
+        validation_fraction=0.25,
+        min_validation_tokens=3,
+    )
+    inputs, targets = sample_token_batch(
+        train_tokens,
+        batch_size=4,
+        context_length=3,
+        device="cpu",
+    )
+
+    assert train_tokens.tolist() == list(range(15))
+    assert val_tokens.tolist() == list(range(15, 20))
+    assert inputs.shape == (4, 3)
+    assert targets.shape == (4, 3)
 
 
 def test_spiking_sequence_lif_is_binary_in_hard_forward_and_has_gradients() -> None:
@@ -94,6 +129,36 @@ def test_spike_language_model_generate_extends_context_and_restores_training() -
 
     assert generated.shape == (1, 9)
     assert torch.equal(generated[:, : input_ids.shape[1]], input_ids)
+    assert model.training
+
+
+def test_evaluate_language_model_reports_loss_bpc_and_restores_training() -> None:
+    torch.manual_seed(0)
+    model = SpikeLanguageModel(
+        SpikeGPTConfig(
+            vocab_size=8,
+            context_length=4,
+            n_layer=1,
+            n_embd=8,
+            dropout=0.0,
+            lif_threshold=0.0,
+        )
+    )
+    model.train()
+    tokens = torch.randint(0, 8, (32,))
+
+    metrics = evaluate_language_model(
+        model,
+        tokens,
+        batch_size=2,
+        context_length=4,
+        device="cpu",
+        batches=2,
+    )
+
+    assert metrics.loss > 0
+    assert metrics.bits_per_character > 0
+    assert metrics.perplexity > 1
     assert model.training
 
 
