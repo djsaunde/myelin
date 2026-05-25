@@ -17,7 +17,13 @@ from spiker.baselines import (
     synchronize_if_needed,
 )
 from spiker.benchmarks.lif import format_memory, format_ms, gpu_name
-from spiker.language import SpikeGPTConfig, SpikeLanguageModel
+from spiker.language import (
+    SPIKEGPT_PRESETS,
+    SpikeGPTConfig,
+    SpikeGPTPreset,
+    SpikeLanguageModel,
+    spikegpt_config_from_preset,
+)
 
 
 @dataclass(frozen=True)
@@ -30,29 +36,45 @@ class TrainingResult:
     error: str | None = None
 
 
+def resolve_config(args: argparse.Namespace) -> SpikeGPTConfig:
+    preset = getattr(args, "preset", "custom")
+    dropout = getattr(args, "dropout", 0.0)
+    lif_threshold = getattr(args, "lif_threshold", 0.0)
+    spike_embedding = not getattr(args, "dense_embedding", False)
+    if preset == "custom":
+        return SpikeGPTConfig(
+            vocab_size=args.vocab_size,
+            context_length=args.context_length,
+            n_layer=args.layers,
+            n_embd=args.embedding,
+            dropout=dropout,
+            lif_threshold=lif_threshold,
+            spike_embedding=spike_embedding,
+        )
+    return spikegpt_config_from_preset(
+        cast(SpikeGPTPreset, preset),
+        vocab_size=args.vocab_size,
+        dropout=dropout,
+        lif_threshold=lif_threshold,
+        spike_embedding=spike_embedding,
+    )
+
+
 def _make_batch(
     args: argparse.Namespace, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    config = resolve_config(args)
     tokens = torch.randint(
         low=0,
         high=args.vocab_size,
-        size=(args.batch, args.context_length + 1),
+        size=(args.batch, config.context_length + 1),
         device=device,
     )
     return tokens[:, :-1], tokens[:, 1:]
 
 
 def _make_model(args: argparse.Namespace, device: torch.device) -> SpikeLanguageModel:
-    config = SpikeGPTConfig(
-        vocab_size=args.vocab_size,
-        context_length=args.context_length,
-        n_layer=args.layers,
-        n_embd=args.embedding,
-        dropout=args.dropout,
-        lif_threshold=args.lif_threshold,
-        spike_embedding=not args.dense_embedding,
-    )
-    return SpikeLanguageModel(config).to(device=device)
+    return SpikeLanguageModel(resolve_config(args)).to(device=device)
 
 
 def _train_step(
@@ -129,12 +151,13 @@ def _benchmark_path(
 def run_benchmark(args: argparse.Namespace) -> list[TrainingResult]:
     if args.batch <= 0:
         raise ValueError("--batch must be positive")
-    if args.context_length <= 0:
-        raise ValueError("--context-length must be positive")
-    if args.layers <= 0:
-        raise ValueError("--layers must be positive")
-    if args.embedding <= 0:
-        raise ValueError("--embedding must be positive")
+    if getattr(args, "preset", "custom") == "custom":
+        if args.context_length <= 0:
+            raise ValueError("--context-length must be positive")
+        if args.layers <= 0:
+            raise ValueError("--layers must be positive")
+        if args.embedding <= 0:
+            raise ValueError("--embedding must be positive")
     if args.vocab_size <= 0:
         raise ValueError("--vocab-size must be positive")
     if args.warmup < 0:
@@ -185,14 +208,15 @@ def run_benchmark(args: argparse.Namespace) -> list[TrainingResult]:
 
 
 def print_markdown(args: argparse.Namespace, rows: list[TrainingResult]) -> None:
+    config = resolve_config(args)
     print("# SpikeGPT Training Benchmark")
     print()
     print(f"Generated: {datetime.now(UTC).isoformat()}")
     print(f"Device: {args.device} ({gpu_name(args.device)})")
     print(
         "Shape: "
-        f"batch={args.batch}, context_length={args.context_length}, layers={args.layers}, "
-        f"embedding={args.embedding}, vocab_size={args.vocab_size}"
+        f"batch={args.batch}, preset={args.preset}, context_length={config.context_length}, "
+        f"layers={config.n_layer}, embedding={config.n_embd}, vocab_size={args.vocab_size}"
     )
     print(
         f"Warmup: {args.warmup}; repeats: {args.repeats}; seed: {args.seed}; "
@@ -214,6 +238,7 @@ def print_markdown(args: argparse.Namespace, rows: list[TrainingResult]) -> None
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--preset", choices=("custom", *SPIKEGPT_PRESETS.keys()), default="custom")
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--context-length", type=int, default=128)
     parser.add_argument("--layers", type=int, default=4)

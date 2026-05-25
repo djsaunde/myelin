@@ -15,7 +15,8 @@ from spiker.baselines import (
     synchronize_if_needed,
 )
 from spiker.benchmarks.lif import format_memory, format_ms, gpu_name
-from spiker.language import SpikeGPTConfig, SpikeLanguageModel
+from spiker.benchmarks.spikegpt_training import resolve_config
+from spiker.language import SPIKEGPT_PRESETS, SpikeLanguageModel
 
 
 @dataclass(frozen=True)
@@ -76,21 +77,13 @@ def run_benchmark(args: argparse.Namespace) -> list[GenerationResult]:
         raise ValueError("--prompt-tokens must be positive")
     if args.new_tokens < 0:
         raise ValueError("--new-tokens must be non-negative")
-    if args.prompt_tokens + args.new_tokens > args.context_length:
+    config = resolve_config(args)
+    if args.prompt_tokens + args.new_tokens > config.context_length:
         raise ValueError(
             "--prompt-tokens + --new-tokens must be <= --context-length so cached and "
             "recompute generation have the same context contract"
         )
 
-    config = SpikeGPTConfig(
-        vocab_size=args.vocab_size,
-        context_length=args.context_length,
-        n_layer=args.layers,
-        n_embd=args.embedding,
-        dropout=0.0,
-        lif_threshold=args.lif_threshold,
-        spike_embedding=not args.dense_embedding,
-    )
     model = SpikeLanguageModel(config).to(device=device)
     model.eval()
     prompt = torch.randint(
@@ -137,6 +130,7 @@ def run_benchmark(args: argparse.Namespace) -> list[GenerationResult]:
 
 
 def print_markdown(args: argparse.Namespace, rows: list[GenerationResult]) -> None:
+    config = resolve_config(args)
     print("# SpikeGPT Generation Benchmark")
     print()
     print(f"Generated: {datetime.now(UTC).isoformat()}")
@@ -144,8 +138,9 @@ def print_markdown(args: argparse.Namespace, rows: list[GenerationResult]) -> No
     print(
         "Shape: "
         f"batch={args.batch}, prompt_tokens={args.prompt_tokens}, "
-        f"new_tokens={args.new_tokens}, context_length={args.context_length}, "
-        f"layers={args.layers}, embedding={args.embedding}, vocab_size={args.vocab_size}"
+        f"new_tokens={args.new_tokens}, preset={args.preset}, "
+        f"context_length={config.context_length}, layers={config.n_layer}, "
+        f"embedding={config.n_embd}, vocab_size={args.vocab_size}"
     )
     print(f"Warmup: {args.warmup}; repeats: {args.repeats}; seed: {args.seed}")
     print()
@@ -162,6 +157,7 @@ def print_markdown(args: argparse.Namespace, rows: list[GenerationResult]) -> No
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--preset", choices=("custom", *SPIKEGPT_PRESETS.keys()), default="custom")
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--prompt-tokens", type=int, default=64)
     parser.add_argument("--new-tokens", type=int, default=32)

@@ -17,7 +17,13 @@ from spiker.baselines import (
     synchronize_if_needed,
 )
 from spiker.benchmarks.lif import format_memory, format_ms, gpu_name
-from spiker.benchmarks.spikegpt_training import _make_batch, _make_model, _train_step
+from spiker.benchmarks.spikegpt_training import (
+    _make_batch,
+    _make_model,
+    _train_step,
+    resolve_config,
+)
+from spiker.language import SPIKEGPT_PRESETS
 
 
 @dataclass(frozen=True)
@@ -50,12 +56,13 @@ def _make_optimizer(args: argparse.Namespace, model: nn.Module) -> torch.optim.O
 def run_probe(args: argparse.Namespace) -> list[CompileProbeRow]:
     if args.batch <= 0:
         raise ValueError("--batch must be positive")
-    if args.context_length <= 0:
-        raise ValueError("--context-length must be positive")
-    if args.layers <= 0:
-        raise ValueError("--layers must be positive")
-    if args.embedding <= 0:
-        raise ValueError("--embedding must be positive")
+    if getattr(args, "preset", "custom") == "custom":
+        if args.context_length <= 0:
+            raise ValueError("--context-length must be positive")
+        if args.layers <= 0:
+            raise ValueError("--layers must be positive")
+        if args.embedding <= 0:
+            raise ValueError("--embedding must be positive")
     if args.vocab_size <= 0:
         raise ValueError("--vocab-size must be positive")
     if args.repeats <= 0:
@@ -135,14 +142,15 @@ def run_probe(args: argparse.Namespace) -> list[CompileProbeRow]:
 
 
 def print_markdown(args: argparse.Namespace, rows: list[CompileProbeRow]) -> None:
+    config = resolve_config(args)
     print("# SpikeGPT Compile Probe")
     print()
     print(f"Generated: {datetime.now(UTC).isoformat()}")
     print(f"Device: {args.device} ({gpu_name(args.device)})")
     print(
         "Shape: "
-        f"batch={args.batch}, context_length={args.context_length}, layers={args.layers}, "
-        f"embedding={args.embedding}, vocab_size={args.vocab_size}"
+        f"batch={args.batch}, preset={args.preset}, context_length={config.context_length}, "
+        f"layers={config.n_layer}, embedding={config.n_embd}, vocab_size={args.vocab_size}"
     )
     print(
         f"compile_mode={args.compile_mode}; fullgraph={args.fullgraph}; "
@@ -162,6 +170,7 @@ def print_markdown(args: argparse.Namespace, rows: list[CompileProbeRow]) -> Non
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--preset", choices=("custom", *SPIKEGPT_PRESETS.keys()), default="custom")
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--context-length", type=int, default=8)
     parser.add_argument("--layers", type=int, default=1)
