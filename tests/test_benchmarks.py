@@ -69,6 +69,7 @@ from spiker.benchmarks.snntorch_matrix import (
     run_matrix as run_snntorch_matrix,
 )
 from spiker.benchmarks.spikegpt_generation import run_benchmark as run_spikegpt_generation
+from spiker.benchmarks.spikegpt_training import run_benchmark as run_spikegpt_training
 from spiker.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
 from spiker.benchmarks.two_layer_recompute import (
     BenchRow as TwoLayerBenchRow,
@@ -989,6 +990,11 @@ def test_benchmark_runner_includes_spikegpt_generation_specs() -> None:
     assert "spikegpt_generation" in {spec.name for spec in PRESETS["core"]}
 
 
+def test_benchmark_runner_includes_spikegpt_training_specs() -> None:
+    assert "spikegpt_training" in {spec.name for spec in PRESETS["smoke"]}
+    assert "spikegpt_training" in {spec.name for spec in PRESETS["core"]}
+
+
 def test_spikegpt_generation_benchmark_smoke() -> None:
     rows = run_spikegpt_generation(
         argparse.Namespace(
@@ -1011,6 +1017,35 @@ def test_spikegpt_generation_benchmark_smoke() -> None:
     assert [row.path for row in rows] == ["recompute_context", "cached_recurrent_state"]
     assert rows[1].matches_reference
     assert rows[1].tokens_per_second > 0
+
+
+def test_spikegpt_training_benchmark_smoke() -> None:
+    rows = run_spikegpt_training(
+        argparse.Namespace(
+            device="cpu",
+            batch=1,
+            context_length=4,
+            layers=1,
+            embedding=8,
+            vocab_size=16,
+            dropout=0.0,
+            lif_threshold=0.0,
+            lr=3e-4,
+            weight_decay=0.01,
+            dense_embedding=False,
+            warmup=0,
+            repeats=1,
+            seed=0,
+            matmul_precision="high",
+            compile=False,
+        )
+    )
+
+    assert [row.path for row in rows] == ["eager"]
+    assert rows[0].error is None
+    assert rows[0].tokens_per_second is not None
+    assert rows[0].tokens_per_second > 0
+    assert rows[0].loss is not None
 
 
 def test_distributed_collectives_benchmark_smoke() -> None:
