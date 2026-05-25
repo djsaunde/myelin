@@ -57,6 +57,22 @@ def metadata_nonnegative_int(metadata: dict[str, object], key: str) -> int:
     return value
 
 
+def compile_spikegpt_regions(model: SpikeLanguageModel) -> SpikeLanguageModel:
+    """Compile repeated SpikeGPT blocks while keeping the top-level loop eager."""
+
+    for index, block in enumerate(model.blocks):
+        model.blocks[index] = torch.compile(block, mode="reduce-overhead", fullgraph=True)
+    return model
+
+
+def mark_compiled_invocation_boundary(enabled: bool) -> None:
+    if not enabled:
+        return
+    mark_step_begin = getattr(torch.compiler, "cudagraph_mark_step_begin", None)
+    if mark_step_begin is not None:
+        mark_step_begin()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -136,7 +152,7 @@ def main() -> None:
         default=False,
         help="checkpoint SpikeGPT blocks during training to reduce saved activations",
     )
-    add_compile_policy_arg(parser)
+    add_compile_policy_arg(parser, extra_policies=("regional",))
     add_grad_clip_arg(parser)
     add_matmul_precision_arg(parser)
     add_wandb_args(parser)
@@ -198,7 +214,9 @@ def main() -> None:
         checkpoint_metadata, "total_steps"
     ) or metadata_nonnegative_int(checkpoint_metadata, "steps")
     total_steps = previous_steps + args.steps
-    compile_model = resolve_compile_policy(args.compile, args.device)
+    compile_model = (
+        True if args.compile == "regional" else resolve_compile_policy(args.compile, args.device)
+    )
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
@@ -226,7 +244,11 @@ def main() -> None:
     print_model_summary(raw_model)
     print()
 
-    model = compile_training_model(raw_model, compile_model)
+    model = (
+        compile_spikegpt_regions(raw_model)
+        if args.compile == "regional"
+        else compile_training_model(raw_model, compile_model)
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     optimizer_loaded = False
     if checkpoint is not None and checkpoint.optimizer_state_dict is not None:
@@ -292,6 +314,7 @@ def main() -> None:
                 torch.cuda.synchronize(torch_device)
             start = time.perf_counter()
             optimizer.zero_grad(set_to_none=True)
+            mark_compiled_invocation_boundary(compile_model)
             warmup_loss, _warmup_logits = model(warmup_inputs, warmup_targets)
             warmup_loss.backward()
             warmup_grad_norm = clip_gradients(model, args.grad_clip)
@@ -329,6 +352,7 @@ def main() -> None:
                 torch.cuda.synchronize(torch_device)
             start = time.perf_counter()
             optimizer.zero_grad(set_to_none=True)
+            mark_compiled_invocation_boundary(compile_model)
             loss, _logits = model(inputs, targets)
             loss.backward()
             grad_norm = clip_gradients(model, args.grad_clip)
@@ -339,11 +363,13 @@ def main() -> None:
             step_times.append(step_seconds)
 
             if step == 1 or step % args.log_every == 0 or step == args.steps:
+                mark_compiled_invocation_boundary(compile_model)
                 rates = raw_model.spike_rates(inputs)
                 block_rates = [value for key, value in rates.items() if key != "embedding"]
                 mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
                 eval_metrics = None
                 if step == 1 or step % args.eval_every == 0 or step == args.steps:
+                    mark_compiled_invocation_boundary(compile_model)
                     eval_metrics = evaluate_language_model(
                         raw_model,
                         val_tokens,
@@ -419,6 +445,7 @@ def main() -> None:
         )
         return
     prompt_tokens = prompt_token_ids.unsqueeze(0).to(device=args.device)
+    mark_compiled_invocation_boundary(compile_model)
     generated = raw_model.generate(
         prompt_tokens,
         max_new_tokens=args.sample_tokens,

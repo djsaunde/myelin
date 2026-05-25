@@ -130,16 +130,24 @@ def configure_matmul_precision(precision: str) -> None:
     torch.set_float32_matmul_precision(precision)
 
 
-def add_compile_policy_arg(parser: argparse.ArgumentParser) -> None:
+def add_compile_policy_arg(
+    parser: argparse.ArgumentParser,
+    *,
+    extra_policies: tuple[str, ...] = (),
+) -> None:
+    choices = (*COMPILE_POLICIES, *extra_policies)
+    extra_help = ""
+    if extra_policies:
+        extra_help = f" Additional policies for this example: {', '.join(extra_policies)}."
     parser.add_argument(
         "--compile",
         nargs="?",
         const="on",
-        choices=COMPILE_POLICIES,
+        choices=choices,
         default="auto",
         help=(
             "compile policy: auto compiles CUDA training by default, on always compiles, "
-            "off disables. Bare --compile is shorthand for --compile on."
+            "off disables. Bare --compile is shorthand for --compile on." + extra_help
         ),
     )
 
