@@ -57,12 +57,28 @@ def metadata_nonnegative_int(metadata: dict[str, object], key: str) -> int:
     return value
 
 
-def compile_spikegpt_regions(model: SpikeLanguageModel) -> SpikeLanguageModel:
+def compile_spikegpt_regions(
+    model: SpikeLanguageModel,
+    *,
+    fullgraph: bool,
+    options: dict[str, object] | None = None,
+) -> SpikeLanguageModel:
     """Compile repeated SpikeGPT blocks while keeping the top-level loop eager."""
 
     for index, block in enumerate(model.blocks):
-        model.blocks[index] = torch.compile(block, mode="reduce-overhead", fullgraph=True)
+        model.blocks[index] = torch.compile(block, fullgraph=fullgraph, options=options)
     return model
+
+
+REGIONAL_LITE_COMPILE_OPTIONS: dict[str, object] = {
+    "max_autotune": False,
+    "max_autotune_gemm": False,
+    "max_autotune_pointwise": False,
+    "triton.autotune_at_compile_time": False,
+    "triton.autotune_cublasLt": False,
+    "triton.cudagraphs": False,
+    "triton.cudagraph_trees": False,
+}
 
 
 def mark_compiled_invocation_boundary(enabled: bool) -> None:
@@ -152,7 +168,7 @@ def main() -> None:
         default=False,
         help="checkpoint SpikeGPT blocks during training to reduce saved activations",
     )
-    add_compile_policy_arg(parser, extra_policies=("regional",))
+    add_compile_policy_arg(parser, extra_policies=("regional", "regional-lite"))
     add_grad_clip_arg(parser)
     add_matmul_precision_arg(parser)
     add_wandb_args(parser)
@@ -215,7 +231,9 @@ def main() -> None:
     ) or metadata_nonnegative_int(checkpoint_metadata, "steps")
     total_steps = previous_steps + args.steps
     compile_model = (
-        True if args.compile == "regional" else resolve_compile_policy(args.compile, args.device)
+        True
+        if args.compile in ("regional", "regional-lite")
+        else resolve_compile_policy(args.compile, args.device)
     )
     print(
         "config="
@@ -245,8 +263,12 @@ def main() -> None:
     print()
 
     model = (
-        compile_spikegpt_regions(raw_model)
-        if args.compile == "regional"
+        compile_spikegpt_regions(
+            raw_model,
+            fullgraph=args.compile == "regional",
+            options=REGIONAL_LITE_COMPILE_OPTIONS if args.compile == "regional-lite" else None,
+        )
+        if args.compile in ("regional", "regional-lite")
         else compile_training_model(raw_model, compile_model)
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
