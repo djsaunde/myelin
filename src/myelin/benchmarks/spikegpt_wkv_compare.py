@@ -27,8 +27,12 @@ from typing import cast
 
 import torch
 
-from myelin.baselines import synchronize_if_needed
-from myelin.benchmarks.lif import format_ms, gpu_name
+from myelin.baselines import (
+    max_cuda_memory_allocated,
+    reset_cuda_peak_memory,
+    synchronize_if_needed,
+)
+from myelin.benchmarks.lif import format_memory, format_ms, gpu_name
 from myelin.language import weighted_key_value as wkv_reference
 
 # --- Variant implementations -------------------------------------------------
@@ -139,14 +143,6 @@ def wkv_scan(key, value, time_decay, time_first):
     return ys.movedim(0, 1)
 
 
-VARIANTS = {
-    "reference_loop": wkv_reference,
-    "scan": wkv_scan,
-    "parallel": wkv_parallel,
-    "chunked": wkv_chunked,
-}
-
-
 # --- Measurement -------------------------------------------------------------
 
 
@@ -157,6 +153,7 @@ class Row:
     fwd_err: float | None
     bwd_err: float | None
     eager_ms: float | None
+    eager_peak_bytes: int | None
     compile_first_ms: float | None
     compiled_steady_ms: float | None
     error: str | None = None
@@ -210,14 +207,22 @@ def run(args) -> list[Row]:
         key, value, time_decay, time_first = _make_inputs(args, t, device)
         ref_out = wkv_reference(key, value, time_decay, time_first)
         ref_grads = _grads(wkv_reference, key, value, time_decay, time_first)
-        for name, fn in VARIANTS.items():
-            kw = {"chunk_size": args.chunk_size} if name == "chunked" else {}
+        base_fns = {
+            "reference_loop": wkv_reference,
+            "scan": wkv_scan,
+            "parallel": wkv_parallel,
+        }
+        variant_list: list[tuple[str, dict]] = [(n, {}) for n in base_fns]
+        variant_list += [(f"chunked{size}", {"chunk_size": size}) for size in args.chunk_sizes]
+        for name, kw in variant_list:
+            fn = base_fns.get(name, wkv_chunked)
 
             def call(k, v, d, f, _fn=fn, _kw=kw):
                 return _fn(k, v, d, f, **_kw)
 
-            # Correctness + eager timing (independent of whether compile succeeds).
+            # Correctness + eager timing + peak memory (independent of compile).
             fwd_err = bwd_err = eager_ms = None
+            eager_peak_bytes = None
             errors: list[str] = []
             try:
                 out = call(key, value, time_decay, time_first)
@@ -226,6 +231,10 @@ def run(args) -> list[Row]:
                 bwd_err = max(
                     (g - r).abs().max().item() for g, r in zip(grads, ref_grads, strict=True)
                 )
+                reset_cuda_peak_memory(device)
+                _grads(call, key, value, time_decay, time_first)
+                synchronize_if_needed(device)
+                eager_peak_bytes = max_cuda_memory_allocated(device)
                 eager_ms = (
                     _time_call(
                         call,
@@ -279,6 +288,7 @@ def run(args) -> list[Row]:
                     fwd_err,
                     bwd_err,
                     eager_ms,
+                    eager_peak_bytes,
                     compile_first_ms,
                     steady_ms,
                     "; ".join(errors) or None,
@@ -294,15 +304,18 @@ def print_markdown(args, rows: list[Row]) -> None:
     print(f"Device: {args.device} ({gpu_name(args.device)})")
     print(f"torch: {torch.__version__}")
     print(
-        f"batch={args.batch}, channels={args.channels}, chunk_size={args.chunk_size}, "
+        f"batch={args.batch}, channels={args.channels}, chunk_sizes={args.chunk_sizes}, "
         f"matmul_precision={args.matmul_precision}, repeats={args.repeats}, "
         f"compile_mode={args.compile_mode}, fullgraph={args.fullgraph}"
     )
     print()
-    print("Timings include forward+backward. `compile_first_ms` includes compilation.")
+    print("Timings/peak memory are forward+backward. `compile_first_ms` includes compilation.")
     print()
-    print("| Variant | T | Fwd err | Bwd err | Eager ms | Compile+1st ms | Steady ms | Error |")
-    print("|---|---:|---:|---:|---:|---:|---:|---|")
+    print(
+        "| Variant | T | Fwd err | Bwd err | Eager ms | Eager peak | "
+        "Compile+1st ms | Steady ms | Error |"
+    )
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---|")
     for r in rows:
 
         def fmt(x, sci=False):
@@ -312,8 +325,8 @@ def print_markdown(args, rows: list[Row]) -> None:
 
         print(
             f"| {r.variant} | {r.timesteps} | {fmt(r.fwd_err, True)} | {fmt(r.bwd_err, True)} | "
-            f"{fmt(r.eager_ms)} | {fmt(r.compile_first_ms)} | {fmt(r.compiled_steady_ms)} | "
-            f"{r.error or ''} |"
+            f"{fmt(r.eager_ms)} | {format_memory(r.eager_peak_bytes)} | "
+            f"{fmt(r.compile_first_ms)} | {fmt(r.compiled_steady_ms)} | {r.error or ''} |"
         )
     print()
     print("## Notes")
@@ -346,7 +359,7 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--timesteps", type=int, nargs="+", default=[32, 64, 128, 256, 512])
-    parser.add_argument("--chunk-size", type=int, default=32)
+    parser.add_argument("--chunk-sizes", type=int, nargs="+", default=[32])
     parser.add_argument(
         "--ref-compile-max-t",
         type=int,
