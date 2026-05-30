@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from spiker.dsl import (
+from myelin.dsl import (
     Expr,
     NeuronBackwardPlan,
     NeuronBuilder,
@@ -26,8 +26,8 @@ from spiker.dsl import (
     validate_surrogate_derivative_ir,
     where,
 )
-from spiker.functional import lif_unroll
-from spiker.neurons import (
+from myelin.functional import lif_unroll
+from myelin.neurons import (
     ALIFParams,
     ALIFState,
     IzhikevichParams,
@@ -38,7 +38,7 @@ from spiker.neurons import (
     izhikevich_step,
     lif_step,
 )
-from spiker.surrogates import SURROGATE_NAMES, surrogate_derivative
+from myelin.surrogates import SURROGATE_NAMES, surrogate_derivative
 
 
 def test_lif_ir_has_expected_boundary() -> None:
@@ -425,7 +425,7 @@ def test_alif_reports_planned_generated_backward_contract() -> None:
 
 
 def test_analyze_neuron_ir_collects_actionable_errors_without_raising() -> None:
-    from spiker.dsl import NeuronIR, param, state
+    from myelin.dsl import NeuronIR, param, state
 
     ir = NeuronIR(
         name="bad-name",
@@ -458,7 +458,7 @@ def test_analyze_neuron_ir_collects_actionable_errors_without_raising() -> None:
 
 
 def test_analyze_neuron_ir_warns_about_non_default_public_unroll_boundary() -> None:
-    from spiker.dsl import NeuronIR, input_, state
+    from myelin.dsl import NeuronIR, input_, state
 
     ir = NeuronIR(
         name="custom_readout",
@@ -482,7 +482,7 @@ def test_analyze_neuron_ir_warns_about_non_default_public_unroll_boundary() -> N
 
 
 def test_analyze_neuron_ir_reports_generated_forward_abi_errors() -> None:
-    from spiker.dsl import NeuronIR, const, input_, state
+    from myelin.dsl import NeuronIR, const, input_, state
 
     stateless = NeuronIR(
         name="custom_stateless",
@@ -605,7 +605,7 @@ def test_neuron_builder_rejects_names_that_codegen_cannot_render() -> None:
 
 
 def test_validate_neuron_ir_rejects_direct_invalid_ir() -> None:
-    from spiker.dsl import NeuronIR, param, state
+    from myelin.dsl import NeuronIR, param, state
 
     invalid_name = NeuronIR(
         name="bad-name",
@@ -753,7 +753,7 @@ def test_evaluate_neuron_unroll_rejects_invalid_boundary() -> None:
 
 
 def test_validate_neuron_ir_rejects_malformed_expression_before_evaluation() -> None:
-    from spiker.dsl import NeuronIR, state
+    from myelin.dsl import NeuronIR, state
 
     malformed = NeuronIR(
         name="bad",

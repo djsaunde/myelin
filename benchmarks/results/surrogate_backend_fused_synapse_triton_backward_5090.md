@@ -5,7 +5,7 @@ hard-forward LIF, loss = `spikes.mean() + 0.1 * final_membrane.square().mean()`.
 Timing excludes first-use compile/warmup. Benchmark command:
 
 ```bash
-uv run python -m spiker.benchmarks.surrogate_backend \
+uv run python -m myelin.benchmarks.surrogate_backend \
   --device cuda --timesteps 25 --batch 64 --features 128 --neurons 2048 \
   --warmup 3 --repeats 10 --matmul-precision high
 ```

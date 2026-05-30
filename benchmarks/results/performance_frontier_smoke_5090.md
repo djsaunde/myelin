@@ -1,7 +1,7 @@
 <!-- benchmark_runner_name: performance_frontier -->
 <!-- benchmark_runner_started: 2026-05-24T15:19:36+00:00 -->
 <!-- benchmark_runner_finished: 2026-05-24T15:19:51+00:00 -->
-<!-- benchmark_runner_command: /home/danjs/code/spiker/.venv/bin/python3 -m spiker.benchmarks.performance_frontier --device cuda --timesteps 16 --batch 8 --features 16 --neurons 64 --checkpoint-size 4 --warmup 1 --repeats 1 -->
+<!-- benchmark_runner_command: /home/danjs/code/myelin/.venv/bin/python3 -m myelin.benchmarks.performance_frontier --device cuda --timesteps 16 --batch 8 --features 16 --neurons 64 --checkpoint-size 4 --warmup 1 --repeats 1 -->
 # Performance Frontier
 
 Canonical compiled-vs-Triton comparison for equal or explicit output contracts.

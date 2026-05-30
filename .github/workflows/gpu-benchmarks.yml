@@ -58,7 +58,7 @@ jobs:
 
       - name: Run benchmark preset
         run: |
-          uv run python -m spiker.benchmarks.runner \
+          uv run python -m myelin.benchmarks.runner \
             --preset "${{ inputs.preset }}" \
             --device cuda \
             --require-cuda \
@@ -68,6 +68,6 @@ jobs:
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: spiker-gpu-benchmarks-${{ inputs.preset }}-${{ inputs.suffix }}
+          name: myelin-gpu-benchmarks-${{ inputs.preset }}-${{ inputs.suffix }}
           path: benchmark-artifacts/*.md
           if-no-files-found: error

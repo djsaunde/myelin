@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from spiker.losses import SpikeRateLoss, spike_rate_loss
+from myelin.losses import SpikeRateLoss, spike_rate_loss
 
 
 def test_spike_rate_loss_matches_manual_mse() -> None:

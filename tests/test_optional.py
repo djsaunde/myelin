@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import spiker._optional as optional
+import myelin._optional as optional
 
 
 def test_optional_availability_is_cached(monkeypatch) -> None:

@@ -1,4 +1,4 @@
-"""Modal launchers for distributed spiker training examples."""
+"""Modal launchers for distributed myelin training examples."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from typing import Literal
 
 import modal
 
-APP_NAME = "spiker-distributed"
-REMOTE_ROOT = "/root/spiker"
+APP_NAME = "myelin-distributed"
+REMOTE_ROOT = "/root/myelin"
 DEFAULT_GPU = "L4:2"
 
 
@@ -33,7 +33,7 @@ class TrainConfig:
     compile_policy: str = "off"
     matmul_precision: str = "high"
     wandb: bool = False
-    wandb_project: str = "spiker"
+    wandb_project: str = "myelin"
     wandb_run_name: str | None = None
 
 
@@ -130,7 +130,7 @@ def run_ddp_smoke(
     train_limit: int = 4096,
     test_limit: int = 1024,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Run the DDP rate-readout example on a cheap single-node multi-GPU Modal box."""
 
@@ -160,7 +160,7 @@ def run_ddp_conv(
     train_limit: int = 60_000,
     test_limit: int = 10_000,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Run the DDP convolutional MNIST example on a cheap single-node multi-GPU box."""
 
@@ -194,7 +194,7 @@ def run_fsdp2_smoke(
     train_limit: int = 4096,
     test_limit: int = 1024,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Run the FSDP2 rate-readout example on a cheap single-node multi-GPU Modal box."""
 
@@ -224,7 +224,7 @@ def main(
     train_limit: int = 4096,
     test_limit: int = 1024,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Launch a cheap Modal smoke run.
 

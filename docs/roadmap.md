@@ -11,13 +11,13 @@ The current v0 training-path recommendation is tracked separately in
 
 | Milestone | Status | Current Evidence | Main Remaining Gap |
 |---|---|---|---|
-| M1 fused-time LIF proof of concept | Mostly complete | `spiker.kernels.lif_forward`, Triton forward/backward surrogate paths, `benchmarks/results/lif_triton_forward_5090.md`, `benchmarks/results/surrogate_backend_generated_triton_5090.md` | Broader third-party benchmark comparison and more tuned kernels |
+| M1 fused-time LIF proof of concept | Mostly complete | `myelin.kernels.lif_forward`, Triton forward/backward surrogate paths, `benchmarks/results/lif_triton_forward_5090.md`, `benchmarks/results/surrogate_backend_generated_triton_5090.md` | Broader third-party benchmark comparison and more tuned kernels |
 | M2 neuron DSL v0 + composability | Partial but real | `NeuronBuilder`, custom ALIF/refractory-LIF examples, generic `generated_forward`, generated LIF/ALIF/Izhikevich forward, `benchmarks/results/generated_forward_5090.md` | Generated kernels beyond pointwise forward |
 | M3 checkpoint across time | Partial | PyTorch oracle plus handwritten/generated Triton checkpoint paths with optional input gradients, `benchmarks/results/surrogate_backend_time_scaling_5090.md`, `benchmarks/results/checkpoint_size_sweep_5090.md` | Tuning against compiled PyTorch memory behavior at long `T` |
 | M4 bitpacked spikes | Partial | `PackedSpikes`, PyTorch/Triton pack/unpack/count/rate, public `lif_forward_packed_spikes`, `linear_surrogate_lif_packed_forward`, and `LinearSurrogateLIFPacked`, packed saved spike traces, `benchmarks/results/packed_forward_5090.md`, `benchmarks/results/bitpack_5090.md` | Public training outputs and some internal spike tensors still use dense storage |
 | M5 distributed | Started | Packed spike all-gather/count/rate all-reduce helpers, CUDA packed row-count kernel, `wrap_fsdp_if_initialized`, two-rank Gloo smoke, and local NCCL smoke artifacts | Custom sparse/packed collectives and real multi-GPU benchmarks |
 | M6 online learning rules | Started | LIF and ALIF dense eligibility-trace oracles, `LinearOnlineLIF`/`LinearOnlineALIF` wrappers, and CPU/CUDA `online_learning` benchmarks | Richer e-prop variants and lower-memory online traces |
-| M7 hardware bridge | Started | `spiker.hardware` dense LIF JSON export schema, signed symmetric quantized export schema, generic placement plan, bundle manifest, SpiNNaker 2 adapter manifest, and round-trip tests | Target SDK object generation |
+| M7 hardware bridge | Started | `myelin.hardware` dense LIF JSON export schema, signed symmetric quantized export schema, generic placement plan, bundle manifest, SpiNNaker 2 adapter manifest, and round-trip tests | Target SDK object generation |
 
 ## What Is Working
 
@@ -80,13 +80,13 @@ The current v0 training-path recommendation is tracked separately in
 - Handwritten and generated checkpointed dense-synapse Triton backward derive
   hard spikes from per-chunk pre-reset membrane scratch, avoiding separate
   checkpoint spike scratch.
-- `spiker.distributed` provides the first packed spike collective helpers:
+- `myelin.distributed` provides the first packed spike collective helpers:
   packed all-gather and packed count/rate all-reduce over initialized
   `torch.distributed` process groups. `wrap_fsdp_if_initialized` provides a
   conservative FSDP integration boundary for distributed launches. The local
   two-rank Gloo benchmark shows the packed payload path clearly, while also
   showing that CPU/Gloo count/rate reductions need a faster CUDA-aware
-  implementation. `spiker.triton.packed_spike_counts_triton` is the first CUDA
+  implementation. `myelin.triton.packed_spike_counts_triton` is the first CUDA
   row-count fast path for those reductions.
 - `linear_surrogate_lif_rate_forward` provides specialized checkpointed
   spike-rate objectives that return either a scalar rate or `[B, N]` rates
@@ -104,19 +104,19 @@ The current v0 training-path recommendation is tracked separately in
   custom surrogates a real learning-rule path before full generated-backward
   integration. `examples/custom_surrogate_online.py` shows that workflow through
   `LinearOnlineLIF` and validates it against the functional oracle.
-  `spiker.benchmarks.online_learning` compares these online updates against
+  `myelin.benchmarks.online_learning` compares these online updates against
   surrogate BPTT baselines on CPU and CUDA.
-- `spiker.hardware` provides the first hardware-bridge compatibility artifact:
-  a validated `spiker.dense_lif.v0` JSON schema for dense LIF weights, optional
+- `myelin.hardware` provides the first hardware-bridge compatibility artifact:
+  a validated `myelin.dense_lif.v0` JSON schema for dense LIF weights, optional
   bias, neuron parameters, timestep metadata, and string metadata.
-  `quantize_dense_lif_export` derives a `spiker.dense_lif_quantized.v0`
+  `quantize_dense_lif_export` derives a `myelin.dense_lif_quantized.v0`
   fixed-point artifact with explicit bit width, integer range, and scales.
-  `plan_dense_lif_placement` derives a `spiker.dense_lif_placement.v0`
+  `plan_dense_lif_placement` derives a `myelin.dense_lif_placement.v0`
   core-tiling artifact with accumulator requirements for split input shards.
   `export_linear_lif_hardware_bundle` writes the float, quantized, placement,
   and manifest artifacts for a `LinearLIF`-style module into one directory.
   `export_spinnaker2_dense_lif_manifest` derives a
-  `spiker.spinnaker2_dense_lif_manifest.v0` handoff artifact with per-core
+  `myelin.spinnaker2_dense_lif_manifest.v0` handoff artifact with per-core
   neuron and incoming-synapse constraints and mapping ranges for a later
   SpiNNaker 2 SDK lowering pass.
   `examples/export_hardware_bundle.py --adapter spinnaker2` is the runnable
@@ -127,7 +127,7 @@ The current v0 training-path recommendation is tracked separately in
   model summaries, step-time logging, grad clipping, and optional W&B logging
   where the example supports tracking.
 - CPU CI now covers formatting, linting, type checking, examples, and tests.
-- `spiker.benchmarks.runner` provides smoke/core CUDA benchmark presets with
+- `myelin.benchmarks.runner` provides smoke/core CUDA benchmark presets with
   dry-run command tables and markdown artifact output, so the key 5090 readouts
   can be regenerated from one entry point. The runner now includes the hardware
   export smoke, compile-visible Triton boundary/sweep, and distributed
@@ -139,7 +139,7 @@ The current v0 training-path recommendation is tracked separately in
 
 ## Performance Frontier
 
-`spiker.benchmarks.performance_frontier` is the canonical compiled-vs-Triton
+`myelin.benchmarks.performance_frontier` is the canonical compiled-vs-Triton
 comparison. It separates equal-contract rows from explicit SNN-specific output
 contracts so we do not overread one-off benchmark artifacts.
 
@@ -149,7 +149,7 @@ contracts so we do not overread one-off benchmark artifacts.
 | Dense-output training | `torch.compile` materialized graph vs Triton checkpoint recompute | `T=100, B=64, F=128, N=2048` | 0.747 ms compiled vs 0.739 ms Triton; effectively tied, Triton backward increment 66.4 MB |
 | Rate/scalar training | `torch.compile` materialized graph vs Triton checkpoint rate output | `T=100, B=64, F=128, N=2048` | 0.747 ms compiled baseline vs 0.697 ms Triton rate and 0.718 ms generated Triton rate; Triton 1.04-1.07x faster, 16.9 MB backward increment |
 
-`spiker.benchmarks.training_breakdown` isolates the training pieces behind that
+`myelin.benchmarks.training_breakdown` isolates the training pieces behind that
 tie on the same `T=100, B=64, F=128, N=2048` workload:
 
 | Component | Path | Current Readout |
@@ -213,7 +213,7 @@ above for strategy-level compiled-vs-Triton conclusions.
 | MNIST rate `triton_compile` smoke comparison | `T=10, B=128, hidden=128, 1024 train examples` | compiled rate and rate-triton-compile both reached 60.55% test accuracy and 2.136011 test loss; steady step improved from 2.331 ms to 1.566 ms |
 | MNIST rate `triton_compile` longer comparison | `T=10, B=128, hidden=128, 4096 train examples, 2 epochs` | regular rate and rate-triton-compile reached 82.42%/82.67% accuracy with similar loss; total wall time improved from 5.054 s to 4.368 s, but steady step was slower at 1.925 ms vs 1.607 ms |
 | MNIST rate matrix | `T=10/25, hidden=128/256, 4096 train examples, 2 epochs` | rate-triton-compile preserved quality across all three tested settings. It reduced memory at `T=25, hidden=128` from 110.3 MB to 44.0 MB, but steady step was slower in all settings: 1.900/1.732/1.839 ms vs regular rate 1.764/1.555/1.475 ms |
-| spiker vs snnTorch timestep matrix | `T=10/25/50, B=128, hidden=128, 1024 train examples, 1 epoch` | compiled spiker rate steady-step speedup over eager snnTorch dense grew from 9.92x to 26.91x to 50.42x as `T` increased; compiled spiker conv was 9.11x/9.69x/11.81x faster than eager snnTorch conv. Rate-readout memory was lower than snnTorch dense at every tested `T` |
+| myelin vs snnTorch timestep matrix | `T=10/25/50, B=128, hidden=128, 1024 train examples, 1 epoch` | compiled myelin rate steady-step speedup over eager snnTorch dense grew from 9.92x to 26.91x to 50.42x as `T` increased; compiled myelin conv was 9.11x/9.69x/11.81x faster than eager snnTorch conv. Rate-readout memory was lower than snnTorch dense at every tested `T` |
 | Two-layer packed-hidden/recompute probe | `T=10/25/50, B=128, F=784, H=128, C=10` | packed-hidden boundary storage was faster than composed on 2/3 shapes but lower-memory on 0/3: composed 1.297/0.843/0.933 ms and 6.6/78.9/91.8 MB vs packed 1.365/0.814/0.901 ms and 7.6/80.2/93.5 MB. Whole-model recompute remained much slower at 19.149/29.870/61.186 ms |
 | Large packed-hidden sweep | `T=25/50, B=128, F=784, H=512/1024/2048, C=10` | packed-hidden storage was still lower-memory on 0/6 shapes. It was roughly time-neutral, but peak memory was consistently higher: composed 27.8-207.5 MB vs packed 33.3-237.4 MB |
 | MNIST rate memory smoke comparison | `T=10, B=128, hidden=128, 512 train examples` | dense/rate 36.7%/37.3%; peak CUDA 45.3/18.7 MB |
@@ -222,8 +222,8 @@ above for strategy-level compiled-vs-Triton conclusions.
 | MNIST rate backend/policy comparison | `T=10, B=128, hidden=128, 4096 train examples, 2 epochs, rate checkpoint=memory` | compiled dense/rate/generated-rate 82.86%/83.20%/82.47%; peak CUDA 45.3/18.7/18.7 MB; steady step 1.256/1.193/1.269 ms |
 | Tuned MNIST rate MLP | `T=25, B=128, hidden=256, 10000 train examples, 3 epochs` | recommended compiled `backend=auto -> triton` rate path reached 90.82% accuracy and 1.541005 final test loss; peak CUDA 114.0 MB |
 | Larger regularized MNIST rate MLP | `T=25, B=128, hidden=512, 20000 train examples, 4 epochs, dropout=0.1, label smoothing=0.05` | recommended compiled `backend=auto -> triton` rate path reached 95.51% accuracy and 1.544614 final test loss; peak CUDA 145.0 MB |
-| MNIST vs snnTorch smoke comparison | `T=10, B=128, hidden=128, 1024 train examples` | compiled spiker steady step dense/rate/conv 1.212/1.207/1.958 ms vs snnTorch eager dense/conv 15.692/17.151 ms |
-| Tuned MNIST conv smoke comparison | `T=10, B=128, hidden=128, 1024 train examples` | compiled spiker conv 59.1% vs snnTorch conv 55.7%; steady step 1.804 vs 18.807 ms |
+| MNIST vs snnTorch smoke comparison | `T=10, B=128, hidden=128, 1024 train examples` | compiled myelin steady step dense/rate/conv 1.212/1.207/1.958 ms vs snnTorch eager dense/conv 15.692/17.151 ms |
+| Tuned MNIST conv smoke comparison | `T=10, B=128, hidden=128, 1024 train examples` | compiled myelin conv 59.1% vs snnTorch conv 55.7%; steady step 1.804 vs 18.807 ms |
 | Tuned MNIST conv example | `T=25, B=128, hidden=256, 10000 train examples, 4 epochs` | compiled conv example reached 95.78% accuracy and 1.497434 final test loss; peak CUDA 900.3 MB |
 | Regularized MNIST conv example | `T=25, B=128, hidden=256, 10000 train examples, 4 epochs, dropout=0.1, label smoothing=0.05` | compiled conv example reached 96.46% accuracy and 1.534343 final test loss; peak CUDA 899.4 MB |
 | Direct packed LIF forward | `T=100, B=64, N=2048` | 0.028 ms direct packed vs 0.055 ms dense |
@@ -256,24 +256,24 @@ conv example now keeps stochastic image encoding outside the compiled model
 forward, which fixed the compiled conv accuracy drop seen in the earlier smoke
 comparison.
 
-`spiker.benchmarks.currents_boundary` now reports forward peak increments above
+`myelin.benchmarks.currents_boundary` now reports forward peak increments above
 baseline allocation and normalizes those increments by expected `[T, B, N]`
 current bytes. Use that table when auditing whether a compiled graph appears to
 keep, eliminate, rematerialize, or reuse storage for the nominal currents
 tensor.
-`spiker.benchmarks.currents_audit` includes handwritten and generated Triton
+`myelin.benchmarks.currents_audit` includes handwritten and generated Triton
 checkpoint rate-output variants so the same materialization table also exposes
 when dense spike outputs, not dense currents, are the dominant remaining
 allocation.
-`spiker.benchmarks.compile_inspect` dumps Dynamo/Inductor artifacts for the pure
+`myelin.benchmarks.compile_inspect` dumps Dynamo/Inductor artifacts for the pure
 PyTorch workloads. The smoke inspection suggests the compiled baseline's memory
 behavior comes from whole-graph fusion plus scratch lifetime planning, buffer
 deletion, reuse, and view aliasing, not from avoiding all dense current/state
 storage in dense-output BPTT.
-`spiker.benchmarks.checkpoint_size_sweep` sweeps chunk size and shows the
+`myelin.benchmarks.checkpoint_size_sweep` sweeps chunk size and shows the
 checkpoint memory tradeoff directly: chunk-start states shrink as chunk size
 grows, while per-chunk recompute scratch grows with chunk size.
-`spiker.benchmarks.two_layer_recompute` probes whether packed hidden-boundary
+`myelin.benchmarks.two_layer_recompute` probes whether packed hidden-boundary
 storage or a whole-model PyTorch recompute wrapper can remove the hidden spike
 trace in a two-layer rate model. The current result is mixed/negative:
 packed-hidden storage preserves gradients and can slightly improve time, but it
@@ -284,7 +284,7 @@ we avoid dense unpack/backward scratch. Replay through PyTorch is much slower.
 
 ## Next Best Work
 
-1. Use `spiker.benchmarks.performance_frontier` as the default performance
+1. Use `myelin.benchmarks.performance_frontier` as the default performance
    report and keep the scratch-backed checkpoint rate path as the practical
    Triton training default. The latest frontier shows dense-output training is
    effectively tied with `torch.compile`, while rate/scalar outputs are the

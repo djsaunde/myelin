@@ -4,7 +4,7 @@ Small correctness/perf smoke for the online-learning benchmark. This is not a
 GPU performance result.
 
 ```bash
-uv run python -m spiker.benchmarks.online_learning \
+uv run python -m myelin.benchmarks.online_learning \
   --device cpu \
   --timesteps 4 \
   --batch 2 \

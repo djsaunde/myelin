@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from spiker.neurons import (
+from myelin.neurons import (
     ALIFParams,
     ALIFState,
     IzhikevichParams,
@@ -15,7 +15,7 @@ from spiker.neurons import (
 def test_lif_step_spikes_and_hard_resets() -> None:
     import torch
 
-    from spiker.neurons import lif_step
+    from myelin.neurons import lif_step
 
     state = LIFState(membrane=torch.tensor([[0.5, 0.0]]))
     inputs = torch.tensor([[0.6, 0.2]])
@@ -30,8 +30,8 @@ def test_lif_step_spikes_and_hard_resets() -> None:
 def test_lif_unroll_matches_repeated_steps() -> None:
     import torch
 
-    from spiker.functional import lif_unroll
-    from spiker.neurons import lif_step
+    from myelin.functional import lif_unroll
+    from myelin.neurons import lif_step
 
     inputs = torch.tensor(
         [
@@ -58,8 +58,8 @@ def test_lif_unroll_matches_repeated_steps() -> None:
 def test_lif_shape_errors_are_explicit() -> None:
     import torch
 
-    from spiker.functional import lif_unroll
-    from spiker.neurons import lif_step
+    from myelin.functional import lif_unroll
+    from myelin.neurons import lif_step
 
     params = LIFParams()
     with pytest.raises(ValueError, match="same shape"):
@@ -72,7 +72,7 @@ def test_lif_shape_errors_are_explicit() -> None:
 def test_alif_step_uses_adaptive_threshold_and_updates_adaptation() -> None:
     import torch
 
-    from spiker.neurons import alif_step
+    from myelin.neurons import alif_step
 
     state = ALIFState(
         membrane=torch.tensor([[0.5, 0.0]]),
@@ -97,7 +97,7 @@ def test_alif_step_uses_adaptive_threshold_and_updates_adaptation() -> None:
 def test_alif_step_spike_increments_adaptation() -> None:
     import torch
 
-    from spiker.neurons import alif_step
+    from myelin.neurons import alif_step
 
     state = ALIFState(
         membrane=torch.tensor([[0.5, 0.0]]),
@@ -116,7 +116,7 @@ def test_alif_step_spike_increments_adaptation() -> None:
 def test_izhikevich_step_spikes_and_resets() -> None:
     import torch
 
-    from spiker.neurons import izhikevich_step
+    from myelin.neurons import izhikevich_step
 
     state = IzhikevichState(
         voltage=torch.tensor([[29.0, -65.0]]),
@@ -136,8 +136,8 @@ def test_izhikevich_step_spikes_and_resets() -> None:
 def test_izhikevich_unroll_matches_repeated_steps() -> None:
     import torch
 
-    from spiker.functional import izhikevich_unroll
-    from spiker.neurons import izhikevich_step
+    from myelin.functional import izhikevich_unroll
+    from myelin.neurons import izhikevich_step
 
     inputs = torch.tensor(
         [

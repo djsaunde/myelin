@@ -40,7 +40,7 @@ from torchvision import datasets, transforms
 from train_mnist import accuracy, limited_dataset, make_time_inputs, synchronize_if_needed
 from train_mnist_rate import resolve_backend
 
-from spiker import RateReadoutClassifier, parse_checkpoint_size, resolve_checkpoint_size
+from myelin import RateReadoutClassifier, parse_checkpoint_size, resolve_checkpoint_size
 
 RateBackend = Literal["auto", "torch", "triton", "triton_generated", "triton_compile"]
 

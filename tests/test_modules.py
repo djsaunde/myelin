@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker.baselines import compiled_available
-from spiker.functional import alif_unroll, lif_unroll, surrogate_alif_unroll, surrogate_lif_unroll
-from spiker.kernels import two_layer_surrogate_lif_rate_recompute_forward
-from spiker.losses import SpikeRateLoss
-from spiker.modules import (
+from myelin.baselines import compiled_available
+from myelin.functional import alif_unroll, lif_unroll, surrogate_alif_unroll, surrogate_lif_unroll
+from myelin.kernels import two_layer_surrogate_lif_rate_recompute_forward
+from myelin.losses import SpikeRateLoss
+from myelin.modules import (
     ALIFCell,
     CustomNeuronCell,
     CustomSurrogateNeuronCell,
@@ -27,7 +27,7 @@ from spiker.modules import (
     fast_sigmoid_surrogate,
     hard_surrogate_spike,
 )
-from spiker.neurons import (
+from myelin.neurons import (
     ALIFParams,
     ALIFState,
     IzhikevichParams,
@@ -38,7 +38,7 @@ from spiker.neurons import (
 
 
 def build_test_lif_ir():
-    from spiker.dsl import NeuronBuilder, where
+    from myelin.dsl import NeuronBuilder, where
 
     builder = NeuronBuilder("custom_lif")
     membrane = builder.state("membrane")
@@ -134,7 +134,7 @@ def test_time_unroll_alif_auto_backend_matches_reference_on_cpu() -> None:
 
 
 def test_time_unroll_izhikevich_auto_backend_matches_reference_on_cpu() -> None:
-    from spiker.functional import izhikevich_unroll
+    from myelin.functional import izhikevich_unroll
 
     inputs = torch.rand((4, 2, 3)) * 15.0
     params = IzhikevichParams()
@@ -154,7 +154,7 @@ def test_time_unroll_izhikevich_auto_backend_matches_reference_on_cpu() -> None:
 
 
 def test_custom_neuron_cell_unroll_matches_dsl_reference_on_cpu() -> None:
-    from spiker.dsl import NeuronBuilder, evaluate_neuron_unroll, where
+    from myelin.dsl import NeuronBuilder, evaluate_neuron_unroll, where
 
     builder = NeuronBuilder("module_custom_lif")
     membrane = builder.state("membrane")
@@ -186,7 +186,7 @@ def test_custom_neuron_cell_unroll_matches_dsl_reference_on_cpu() -> None:
 
 
 def test_custom_neuron_cell_infers_zero_initial_state() -> None:
-    from spiker.dsl import NeuronBuilder, where
+    from myelin.dsl import NeuronBuilder, where
 
     builder = NeuronBuilder("module_custom_lif_default_state")
     builder.state("membrane")
@@ -206,7 +206,7 @@ def test_custom_neuron_cell_infers_zero_initial_state() -> None:
 
 
 def test_custom_neuron_cell_rejects_mismatched_params_and_state() -> None:
-    from spiker.dsl import NeuronBuilder, where
+    from myelin.dsl import NeuronBuilder, where
 
     builder = NeuronBuilder("module_custom_lif_validation")
     builder.state("membrane")
@@ -235,7 +235,7 @@ def test_custom_neuron_cell_rejects_mismatched_params_and_state() -> None:
 
 
 def test_custom_neuron_cell_rejects_ir_outside_module_abi() -> None:
-    from spiker.dsl import NeuronIR, const, input_, state
+    from myelin.dsl import NeuronIR, const, input_, state
 
     stateless = NeuronIR(
         name="module_stateless",
@@ -415,7 +415,7 @@ def test_custom_surrogate_neuron_cell_matches_lif_surrogate_path() -> None:
 
 
 def test_custom_surrogate_neuron_cell_rejects_unsupported_backward_ir() -> None:
-    from spiker.dsl import alif_ir
+    from myelin.dsl import alif_ir
 
     with pytest.raises(ValueError, match="ALIF generated backward plan is recognized"):
         CustomSurrogateNeuronCell(
@@ -761,7 +761,7 @@ def test_linear_surrogate_lif_stream_synapse_uses_per_timestep_matmuls(
 
 
 def test_linear_surrogate_lif_forward_dispatcher_matches_streamed_module() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward
+    from myelin.kernels import linear_surrogate_lif_forward
 
     torch.manual_seed(12)
     inputs = torch.rand((5, 3, 4), requires_grad=True)
@@ -799,8 +799,8 @@ def test_linear_surrogate_lif_forward_dispatcher_matches_streamed_module() -> No
 
 
 def test_linear_surrogate_lif_packed_forward_torch_matches_dense_dispatcher() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_packed_forward
-    from spiker.packing import unpack_spikes
+    from myelin.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_packed_forward
+    from myelin.packing import unpack_spikes
 
     torch.manual_seed(121)
     inputs = torch.rand((5, 3, 4))
@@ -967,7 +967,7 @@ def test_linear_surrogate_lif_rate_module_matches_dense_spike_rates() -> None:
 
 
 def test_linear_surrogate_lif_packed_module_matches_dense_spikes() -> None:
-    from spiker.packing import unpack_spikes
+    from myelin.packing import unpack_spikes
 
     torch.manual_seed(151)
     inputs = torch.rand((5, 3, 4))

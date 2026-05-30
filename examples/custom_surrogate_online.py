@@ -6,7 +6,7 @@ import argparse
 
 import torch
 
-from spiker import (
+from myelin import (
     LIFParams,
     LinearOnlineLIF,
     SurrogateBuilder,

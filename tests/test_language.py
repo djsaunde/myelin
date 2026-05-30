@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from spiker import (
+from myelin import (
     SPIKEGPT_PRESETS,
     ByteVocabulary,
     CharacterVocabulary,

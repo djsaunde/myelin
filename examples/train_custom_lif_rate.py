@@ -23,9 +23,9 @@ from example_utils import (
     resolve_compile_policy,
 )
 
-from spiker import LinearCustomSurrogateNeuronRate, NeuronBuilder, SpikeRateLoss
-from spiker.dsl import where
-from spiker.modules import fast_sigmoid_surrogate
+from myelin import LinearCustomSurrogateNeuronRate, NeuronBuilder, SpikeRateLoss
+from myelin.dsl import where
+from myelin.modules import fast_sigmoid_surrogate
 
 
 def build_custom_lif_ir():

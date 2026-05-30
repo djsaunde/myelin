@@ -113,7 +113,7 @@ def print_cuda_peak_memory_summary(device: str) -> None:
 
 def add_wandb_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--wandb-project", default="spiker")
+    parser.add_argument("--wandb-project", default="myelin")
     parser.add_argument("--wandb-run-name")
 
 

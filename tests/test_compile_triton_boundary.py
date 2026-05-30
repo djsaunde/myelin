@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker._optional import has_triton
-from spiker.neurons import LIFParams
+from myelin._optional import has_triton
+from myelin.neurons import LIFParams
 
 pytestmark = pytest.mark.extended
 
@@ -14,7 +14,7 @@ pytestmark = pytest.mark.extended
     reason="compile-visible Triton op requires CUDA and Triton",
 )
 def test_compile_visible_rate_forward_matches_existing_triton_forward() -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         linear_lif_checkpoint_rate_forward_no_bias_op,
         linear_surrogate_lif_checkpoint_rate_forward,
     )
@@ -53,7 +53,7 @@ def test_compile_visible_rate_forward_matches_existing_triton_forward() -> None:
     reason="compile-visible Triton op requires CUDA and Triton",
 )
 def test_compile_visible_rate_forward_can_be_torch_compiled() -> None:
-    from spiker.triton import linear_lif_checkpoint_rate_forward_no_bias_op
+    from myelin.triton import linear_lif_checkpoint_rate_forward_no_bias_op
 
     inputs = torch.rand((8, 4, 16), device="cuda")
     weight = (torch.rand((16, 32), device="cuda") - 0.5) * 0.02
@@ -86,8 +86,8 @@ def test_compile_visible_rate_forward_can_be_torch_compiled() -> None:
     reason="compile-visible Triton op requires CUDA and Triton",
 )
 def test_compile_visible_rate_forward_backward_matches_existing_triton_rate_path() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
-    from spiker.triton import linear_lif_checkpoint_rate_forward_no_bias_op
+    from myelin.kernels import linear_surrogate_lif_rate_forward
+    from myelin.triton import linear_lif_checkpoint_rate_forward_no_bias_op
 
     inputs = torch.rand((8, 4, 16), device="cuda")
     weight = ((torch.rand((16, 32), device="cuda") - 0.5) * 0.02).requires_grad_(True)
@@ -135,7 +135,7 @@ def test_compile_visible_rate_forward_backward_matches_existing_triton_rate_path
     reason="compile-visible Triton op requires CUDA and Triton",
 )
 def test_compile_visible_rate_forward_backward_can_be_torch_compiled() -> None:
-    from spiker.triton import linear_lif_checkpoint_rate_forward_no_bias_op
+    from myelin.triton import linear_lif_checkpoint_rate_forward_no_bias_op
 
     inputs = torch.rand((8, 4, 16), device="cuda")
     weight = ((torch.rand((16, 32), device="cuda") - 0.5) * 0.02).requires_grad_(True)
@@ -175,7 +175,7 @@ def test_compile_visible_rate_forward_backward_can_be_torch_compiled() -> None:
     reason="compile-visible Triton op requires CUDA and Triton",
 )
 def test_compile_visible_rate_forward_bias_backward_can_be_torch_compiled() -> None:
-    from spiker.triton import linear_lif_checkpoint_rate_forward_bias_op
+    from myelin.triton import linear_lif_checkpoint_rate_forward_bias_op
 
     inputs = torch.rand((8, 4, 16), device="cuda")
     weight = ((torch.rand((16, 32), device="cuda") - 0.5) * 0.02).requires_grad_(True)

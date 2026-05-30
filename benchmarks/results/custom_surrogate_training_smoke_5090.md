@@ -1,7 +1,7 @@
 <!-- benchmark_runner_name: custom_surrogate_training -->
 <!-- benchmark_runner_started: 2026-05-24T14:38:23+00:00 -->
 <!-- benchmark_runner_finished: 2026-05-24T14:38:26+00:00 -->
-<!-- benchmark_runner_command: /home/danjs/code/spiker/.venv/bin/python3 -m spiker.benchmarks.custom_surrogate_training --device cuda --timesteps 16 --batch 8 --neurons 64 --warmup 1 --repeats 1 -->
+<!-- benchmark_runner_command: /home/danjs/code/myelin/.venv/bin/python3 -m myelin.benchmarks.custom_surrogate_training --device cuda --timesteps 16 --batch 8 --neurons 64 --warmup 1 --repeats 1 -->
 # Custom Surrogate Training Benchmark
 
 Compares custom LIF-shaped surrogate wrappers against the built-in surrogate LIF paths.

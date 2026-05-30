@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker.packing import (
+from myelin.packing import (
     BITS_PER_WORD,
     PackedSpikes,
     dense_spike_bytes,
@@ -19,9 +19,9 @@ from spiker.packing import (
 
 
 def test_lif_forward_packed_spikes_torch_backend_matches_dense_reference() -> None:
-    from spiker.functional import lif_unroll
-    from spiker.kernels import lif_forward_packed_spikes
-    from spiker.neurons import LIFParams, LIFState
+    from myelin.functional import lif_unroll
+    from myelin.kernels import lif_forward_packed_spikes
+    from myelin.neurons import LIFParams, LIFState
 
     torch.manual_seed(0)
     inputs = torch.rand((5, 2, 35))

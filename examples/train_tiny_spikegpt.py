@@ -23,7 +23,7 @@ from example_utils import (
     resolve_compile_policy,
 )
 
-from spiker import (
+from myelin import (
     SPIKEGPT_PRESETS,
     ByteVocabulary,
     CharacterVocabulary,
@@ -40,7 +40,7 @@ from spiker import (
 
 DEFAULT_TEXT = (
     "spiking neural networks trade dense activations for sparse events. "
-    "spiker explores fast training paths for those event driven models. "
+    "myelin explores fast training paths for those event driven models. "
 )
 
 

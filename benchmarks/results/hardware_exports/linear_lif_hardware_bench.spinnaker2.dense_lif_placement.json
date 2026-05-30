@@ -46,7 +46,7 @@
       "synapse_count": 2
     }
   ],
-  "format": "spiker.dense_lif_placement.v0",
+  "format": "myelin.dense_lif_placement.v0",
   "input_size": 3,
   "max_inputs_per_core": 2,
   "max_outputs_per_core": 3,
@@ -55,7 +55,7 @@
     "benchmark": "hardware_export"
   },
   "output_size": 5,
-  "source_format": "spiker.dense_lif_quantized.v0",
+  "source_format": "myelin.dense_lif_quantized.v0",
   "target": "spinnaker2",
   "total_synapse_count": 15
 }

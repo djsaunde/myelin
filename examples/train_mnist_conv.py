@@ -35,7 +35,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from train_mnist import accuracy, limited_dataset, synchronize_if_needed
 
-from spiker import LinearSurrogateLIF, fast_sigmoid_surrogate
+from myelin import LinearSurrogateLIF, fast_sigmoid_surrogate
 
 
 class ConvMNISTSNN(nn.Module):
@@ -96,7 +96,7 @@ def reset_synapse_fan_in(layer: LinearSurrogateLIF) -> None:
 
 
 def apply_synapse_init(model: ConvMNISTSNN, init: str) -> None:
-    if init == "spiker":
+    if init == "myelin":
         return
     if init == "fan_in":
         reset_synapse_fan_in(model.hidden)
@@ -240,7 +240,7 @@ def main() -> None:
     parser.add_argument("--train-limit", type=int)
     parser.add_argument("--test-limit", type=int)
     parser.add_argument("--log-dynamics", action="store_true")
-    parser.add_argument("--synapse-init", choices=("spiker", "fan_in"), default="fan_in")
+    parser.add_argument("--synapse-init", choices=("myelin", "fan_in"), default="fan_in")
     add_matmul_precision_arg(parser)
     add_wandb_args(parser)
     args = parser.parse_args()

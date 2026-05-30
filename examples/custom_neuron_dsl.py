@@ -8,7 +8,7 @@ from typing import Literal
 
 import torch
 
-from spiker import (
+from myelin import (
     CustomNeuronCell,
     CustomSurrogateNeuronCell,
     NeuronBuilder,
@@ -17,7 +17,7 @@ from spiker import (
     evaluate_neuron_unroll,
     fast_sigmoid_surrogate,
 )
-from spiker.dsl import where
+from myelin.dsl import where
 
 Variant = Literal["lif", "alif", "refractory_lif"]
 

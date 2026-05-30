@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-import spiker
-from spiker.surrogates import (
+import myelin
+from myelin.surrogates import (
     SURROGATE_NAMES,
     surrogate_derivative,
     surrogate_from_name,
@@ -19,7 +19,7 @@ def test_registered_surrogates_roundtrip_through_public_helpers() -> None:
         fn = surrogate_from_name(name)
 
         assert surrogate_name(fn) == name
-        assert getattr(spiker, f"{name}_surrogate") is fn
+        assert getattr(myelin, f"{name}_surrogate") is fn
         assert surrogate_derivative(centered, name).shape == centered.shape
 
 

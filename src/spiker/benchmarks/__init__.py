@@ -1,1 +1,0 @@
-"""Benchmark entrypoints for spiker."""

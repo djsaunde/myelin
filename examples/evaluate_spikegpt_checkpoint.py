@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 
-from spiker import (
+from myelin import (
     evaluate_language_model,
     evaluate_language_model_strided,
     load_spike_language_checkpoint,

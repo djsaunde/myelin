@@ -365,7 +365,7 @@ def test_tiny_spikegpt_example_runs_on_cpu(tmp_path: Path) -> None:
             "cpu",
             "--text",
             "spiking neural networks trade dense activations for sparse events. "
-            "spiker explores fast training paths for those event driven models. ",
+            "myelin explores fast training paths for those event driven models. ",
             "--batch",
             "2",
             "--eval-batches",
@@ -448,5 +448,5 @@ def test_export_hardware_bundle_example_writes_spinnaker_adapter(tmp_path: Path)
     )
 
     assert "| spinnaker2_adapter_manifest |" in result.stdout
-    assert "spiker.spinnaker2_dense_lif_manifest.v0" in result.stdout
+    assert "myelin.spinnaker2_dense_lif_manifest.v0" in result.stdout
     assert (tmp_path / "unit.spinnaker2_manifest.json").exists()

@@ -1,14 +1,14 @@
-# MNIST spiker vs snnTorch Comparison
+# MNIST myelin vs snnTorch Comparison
 
 Runs the repo MNIST examples and comparable snnTorch examples with matched
 training knobs.
 
 These are short directional runs, not final accuracy benchmarks.
 
-## Eager spiker vs Eager snnTorch
+## Eager myelin vs Eager snnTorch
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --device cuda \
   --variant dense \
   --variant rate \
@@ -47,12 +47,12 @@ uv run python -m spiker.benchmarks.mnist_compare \
 | snntorch_dense | 1.966508 | 0.6240 | 0.951 | 82.073 | 15.711 | ok |
 | snntorch_conv | 2.158583 | 0.5312 | 1.115 | 106.587 | 17.310 | ok |
 
-## Compiled spiker vs Eager snnTorch
+## Compiled myelin vs Eager snnTorch
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --device cuda \
-  --compile-spiker-only \
+  --compile-myelin-only \
   --variant dense \
   --variant rate \
   --variant conv \
@@ -93,8 +93,8 @@ uv run python -m spiker.benchmarks.mnist_compare \
 ## Takeaway
 
 For this short subset, snnTorch has better early accuracy than the current
-spiker convolutional example, so our conv recipe still needs tuning. The
-steady-state timing story is clearer: compiled spiker dense/rate steps are
-about 13x faster than snnTorch dense eager, and compiled spiker conv is about
+myelin convolutional example, so our conv recipe still needs tuning. The
+steady-state timing story is clearer: compiled myelin dense/rate steps are
+about 13x faster than snnTorch dense eager, and compiled myelin conv is about
 9x faster than snnTorch conv eager. First-step compile overhead dominates total
 seconds in the tiny compiled run.

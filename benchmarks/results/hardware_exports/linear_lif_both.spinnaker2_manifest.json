@@ -1,6 +1,6 @@
 {
   "core_count": 4,
-  "format": "spiker.spinnaker2_dense_lif_manifest.v0",
+  "format": "myelin.spinnaker2_dense_lif_manifest.v0",
   "incoming_synapses_per_core": 65536,
   "input_size": 3,
   "mapping": [
@@ -60,7 +60,7 @@
   "output_size": 5,
   "placement_plan_path": "linear_lif_both.spinnaker2.dense_lif_placement.json",
   "quantized_export_path": "linear_lif_both.dense_lif_quantized.json",
-  "source_format": "spiker.dense_lif_quantized.v0",
+  "source_format": "myelin.dense_lif_quantized.v0",
   "target": "spinnaker2",
   "timestep_ms": 1.0,
   "total_synapse_count": 15,

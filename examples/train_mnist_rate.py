@@ -33,12 +33,12 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from train_mnist import accuracy, limited_dataset, make_time_inputs, synchronize_if_needed
 
-from spiker import (
+from myelin import (
     RateReadoutClassifier,
     parse_checkpoint_size,
     resolve_checkpoint_size,
 )
-from spiker._optional import has_triton
+from myelin._optional import has_triton
 
 RateBackend = Literal["auto", "torch", "triton", "triton_generated", "triton_compile"]
 ResolvedRateBackend = Literal["torch", "triton", "triton_generated", "triton_compile"]

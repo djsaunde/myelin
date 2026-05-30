@@ -16,7 +16,7 @@ Runs the repo MNIST examples with matched training knobs.
 - `train_limit`: `4096`
 - `test_limit`: `2048`
 - `compile`: `False`
-- `compile_spiker_only`: `True`
+- `compile_myelin_only`: `True`
 - `conv_synapse_init`: `None`
 - `matmul_precision`: `highest`
 - `snntorch_beta`: `0.95`

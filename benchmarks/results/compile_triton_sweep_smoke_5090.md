@@ -1,7 +1,7 @@
 <!-- benchmark_runner_name: compile_triton_sweep -->
 <!-- benchmark_runner_started: 2026-05-24T16:47:45+00:00 -->
 <!-- benchmark_runner_finished: 2026-05-24T16:47:56+00:00 -->
-<!-- benchmark_runner_command: /home/danjs/code/spiker/.venv/bin/python3 -m spiker.benchmarks.compile_triton_sweep --device cuda --shape 16,8,16,64 --checkpoint-size 4 --warmup 1 --repeats 1 -->
+<!-- benchmark_runner_command: /home/danjs/code/myelin/.venv/bin/python3 -m myelin.benchmarks.compile_triton_sweep --device cuda --shape 16,8,16,64 --checkpoint-size 4 --warmup 1 --repeats 1 -->
 # Compile/Triton Rate Training Sweep
 
 Compares regular compiled PyTorch scalar-loss training with the existing

@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker.dsl import SurrogateBuilder
-from spiker.neurons import ALIFParams, LIFParams
-from spiker.online import linear_alif_online_eligibility_grad, linear_lif_online_eligibility_grad
-from spiker.surrogates import fast_sigmoid_surrogate
+from myelin.dsl import SurrogateBuilder
+from myelin.neurons import ALIFParams, LIFParams
+from myelin.online import linear_alif_online_eligibility_grad, linear_lif_online_eligibility_grad
+from myelin.surrogates import fast_sigmoid_surrogate
 
 pytestmark = pytest.mark.extended
 
@@ -321,7 +321,7 @@ def test_online_alif_eligibility_grad_accepts_custom_surrogate_ir() -> None:
 
 
 def test_linear_online_alif_module_matches_functional_helper() -> None:
-    from spiker.modules import LinearOnlineALIF
+    from myelin.modules import LinearOnlineALIF
 
     torch.manual_seed(4)
     inputs = torch.rand((5, 3, 4))
@@ -356,7 +356,7 @@ def test_linear_online_alif_module_matches_functional_helper() -> None:
 
 
 def test_linear_online_alif_step_online_updates_parameters() -> None:
-    from spiker.modules import LinearOnlineALIF
+    from myelin.modules import LinearOnlineALIF
 
     torch.manual_seed(5)
     inputs = torch.rand((4, 2, 3))
@@ -377,7 +377,7 @@ def test_linear_online_alif_step_online_updates_parameters() -> None:
 
 
 def test_linear_online_lif_module_matches_functional_helper() -> None:
-    from spiker.modules import LinearOnlineLIF
+    from myelin.modules import LinearOnlineLIF
 
     torch.manual_seed(1)
     inputs = torch.rand((5, 3, 4))
@@ -411,7 +411,7 @@ def test_linear_online_lif_module_matches_functional_helper() -> None:
 
 
 def test_linear_online_lif_module_accepts_custom_surrogate_ir() -> None:
-    from spiker.modules import LinearOnlineLIF
+    from myelin.modules import LinearOnlineLIF
 
     torch.manual_seed(9)
     inputs = torch.rand((5, 3, 4))
@@ -450,7 +450,7 @@ def test_linear_online_lif_module_accepts_custom_surrogate_ir() -> None:
 
 
 def test_linear_online_alif_module_accepts_custom_surrogate_ir() -> None:
-    from spiker.modules import LinearOnlineALIF
+    from myelin.modules import LinearOnlineALIF
 
     torch.manual_seed(10)
     inputs = torch.rand((5, 3, 4))
@@ -487,7 +487,7 @@ def test_linear_online_alif_module_accepts_custom_surrogate_ir() -> None:
 
 
 def test_linear_online_lif_step_online_updates_parameters() -> None:
-    from spiker.modules import LinearOnlineLIF
+    from myelin.modules import LinearOnlineLIF
 
     torch.manual_seed(2)
     inputs = torch.rand((4, 2, 3))
@@ -506,7 +506,7 @@ def test_linear_online_lif_step_online_updates_parameters() -> None:
 
 
 def test_linear_online_lif_supports_biasless_layers_and_rejects_negative_lr() -> None:
-    from spiker.modules import LinearOnlineLIF
+    from myelin.modules import LinearOnlineLIF
 
     inputs = torch.rand((4, 2, 3))
     learning_signal = torch.rand((4, 2, 5))
@@ -521,14 +521,14 @@ def test_linear_online_lif_supports_biasless_layers_and_rejects_negative_lr() ->
 
 
 def test_online_helpers_are_exported() -> None:
-    import spiker
+    import myelin
 
-    assert spiker.OnlineALIFGrad
-    assert spiker.OnlineLIFGrad
-    assert spiker.LinearOnlineALIF
-    assert spiker.LinearOnlineLIF
-    assert spiker.linear_alif_online_eligibility_grad
-    assert spiker.linear_lif_online_eligibility_grad
+    assert myelin.OnlineALIFGrad
+    assert myelin.OnlineLIFGrad
+    assert myelin.LinearOnlineALIF
+    assert myelin.LinearOnlineLIF
+    assert myelin.linear_alif_online_eligibility_grad
+    assert myelin.linear_lif_online_eligibility_grad
 
 
 def _linear_alif_online_dense_adaptation_reference(
@@ -538,9 +538,9 @@ def _linear_alif_online_dense_adaptation_reference(
     learning_signal: torch.Tensor,
     params: ALIFParams,
 ):
-    from spiker.neurons import ALIFState
-    from spiker.online import OnlineALIFGrad
-    from spiker.surrogates import surrogate_derivative
+    from myelin.neurons import ALIFState
+    from myelin.online import OnlineALIFGrad
+    from myelin.surrogates import surrogate_derivative
 
     _timesteps, batch, features = inputs.shape
     neurons = weight.shape[1]

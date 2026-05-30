@@ -5,7 +5,7 @@ import warnings
 import pytest
 import torch
 
-from spiker import kernels
+from myelin import kernels
 
 
 def test_cuda_torch_backend_warns_when_triton_is_available(

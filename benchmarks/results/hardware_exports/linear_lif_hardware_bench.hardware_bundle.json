@@ -1,10 +1,10 @@
 {
   "dense_export_path": "linear_lif_hardware_bench.dense_lif.json",
-  "format": "spiker.hardware_bundle.v0",
+  "format": "myelin.hardware_bundle.v0",
   "formats": {
-    "dense_export": "spiker.dense_lif.v0",
-    "placement_plan": "spiker.dense_lif_placement.v0",
-    "quantized_export": "spiker.dense_lif_quantized.v0"
+    "dense_export": "myelin.dense_lif.v0",
+    "placement_plan": "myelin.dense_lif_placement.v0",
+    "quantized_export": "myelin.dense_lif_quantized.v0"
   },
   "metadata": {
     "benchmark": "hardware_export"

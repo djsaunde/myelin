@@ -5,7 +5,7 @@ hard-forward LIF, `checkpoint_size=25`. Timing excludes first-use compile/warmup
 Benchmark command:
 
 ```bash
-uv run python -m spiker.benchmarks.surrogate_backend \
+uv run python -m myelin.benchmarks.surrogate_backend \
   --device cuda --timesteps 100 --batch 64 --features 128 --neurons 2048 \
   --warmup 2 --repeats 5 --matmul-precision high --checkpoint-size 25
 ```

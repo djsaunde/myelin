@@ -1,8 +1,8 @@
-# spiker
+# myelin
 
 Fast, time-fused spiking neural network simulation for PyTorch.
 
-`spiker` is a research-grade SNN library targeting the bottleneck that dominates
+`myelin` is a research-grade SNN library targeting the bottleneck that dominates
 many training workloads: Python-side time loops and per-timestep GPU kernel
 launches. PyTorch is a required dependency and the correctness oracle; Triton is
 the optional CUDA backend for fused-time kernels.
@@ -54,15 +54,15 @@ uv run ruff format --check . && uv run ruff check . && uv run pyright \
 
 ## Package map
 
-- `spiker.neurons` — correctness-first neuron dynamics (the oracle).
-- `spiker.functional` — unfused PyTorch reference simulations.
-- `spiker.kernels` — stable backend-dispatched forward/training entry points.
-- `spiker.triton` — raw Triton kernels and packing helpers.
-- `spiker.autograd` — custom autograd boundaries used by the dispatchers.
-- `spiker.packing` — bitpacked spikes (32 spikes per signed int32 word).
-- `spiker.modules` — small PyTorch training modules over the kernel paths.
-- `spiker.online` — e-prop/OSTL-style online eligibility-trace rules.
-- `spiker.hardware` — JSON hardware-bridge export (dense LIF, quantized,
+- `myelin.neurons` — correctness-first neuron dynamics (the oracle).
+- `myelin.functional` — unfused PyTorch reference simulations.
+- `myelin.kernels` — stable backend-dispatched forward/training entry points.
+- `myelin.triton` — raw Triton kernels and packing helpers.
+- `myelin.autograd` — custom autograd boundaries used by the dispatchers.
+- `myelin.packing` — bitpacked spikes (32 spikes per signed int32 word).
+- `myelin.modules` — small PyTorch training modules over the kernel paths.
+- `myelin.online` — e-prop/OSTL-style online eligibility-trace rules.
+- `myelin.hardware` — JSON hardware-bridge export (dense LIF, quantized,
   placement, SpiNNaker 2 manifest).
 
 The package ships `py.typed`. Inputs are time-major: `[T, B, N]`.
@@ -80,7 +80,7 @@ The package ships `py.typed`. Inputs are time-major: `[T, B, N]`.
   CUDA-without-Triton, since it may leave a large speedup unused).
 
 ```python
-from spiker import LIFParams, LIFState, lif_forward
+from myelin import LIFParams, LIFState, lif_forward
 
 params = LIFParams(tau_mem=20.0, threshold=1.0, reset=0.0)
 initial = LIFState(membrane=current.new_zeros(current.shape[1:]))
@@ -126,7 +126,7 @@ derivative IRs plug in via `surrogate=`.
 
 ## Hardware export
 
-`spiker.hardware` writes a generic JSON bridge for dense LIF layers: float
+`myelin.hardware` writes a generic JSON bridge for dense LIF layers: float
 export → signed-symmetric quantized export → core placement plan → bundle
 manifest, plus a SpiNNaker 2 adapter manifest. These are validated handoff
 artifacts, not SDK programs.
@@ -141,7 +141,7 @@ uv run python examples/export_hardware_bundle.py --output-dir hardware_exports
 `[T, B, ceil(N / 32)]` int32 (a 32x reduction when `N % 32 == 0`).
 `packed_spike_count`/`packed_spike_rate` reduce packed words directly (Triton
 row-count fast path on CUDA). `lif_forward_packed_spikes(..., backend="auto")`
-writes packed output directly on CUDA + Triton. `spiker.distributed` adds packed
+writes packed output directly on CUDA + Triton. `myelin.distributed` adds packed
 all-gather and count/rate all-reduce helpers over `PackedSpikes`.
 
 ## Examples and benchmarks
@@ -151,14 +151,14 @@ Runnable training examples live in `examples/` (e.g. `train_mnist_rate.py`,
 `benchmarks/results/`. Regenerate the canonical CUDA set with:
 
 ```bash
-uv run python -m spiker.benchmarks.performance_frontier --device cuda  # compiled-vs-Triton frontier
-uv run python -m spiker.benchmarks.training_breakdown --device cuda    # projection/forward/backward split
-uv run python -m spiker.benchmarks.runner --preset core --require-cuda --suffix 5090
+uv run python -m myelin.benchmarks.performance_frontier --device cuda  # compiled-vs-Triton frontier
+uv run python -m myelin.benchmarks.training_breakdown --device cuda    # projection/forward/backward split
+uv run python -m myelin.benchmarks.runner --preset core --require-cuda --suffix 5090
 ```
 
-`spiker.benchmarks.headline` summarizes saved artifacts without retraining, and
+`myelin.benchmarks.headline` summarizes saved artifacts without retraining, and
 the runner is wired into the manual `GPU Benchmarks` GitHub Actions workflow
 (`--dry-run` prints the command/artifact table). As one external reference
-point, on `benchmarks/results/snntorch_matrix_5090.md` compiled spiker
+point, on `benchmarks/results/snntorch_matrix_5090.md` compiled myelin
 rate-readout steady-step speedup over eager snnTorch grew from 9.92x at `T=10`
 to 50.42x at `T=50` — another facet of the same compile-first takeaway.

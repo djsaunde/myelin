@@ -1,7 +1,7 @@
 # Modal Distributed Launchers
 
 These launchers run the existing distributed examples on Modal without making
-Modal a runtime dependency of `spiker`.
+Modal a runtime dependency of `myelin`.
 
 The default GPU target is `L4:2`, which is intentionally cheaper than H100/B200
 and enough for smoke testing our DDP/FSDP2 wiring. Increase the GPU class later

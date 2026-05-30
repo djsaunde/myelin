@@ -863,6 +863,54 @@ wheels = [
 ]
 
 [[package]]
+name = "myelin"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+
+[package.optional-dependencies]
+bench = [
+    { name = "numpy" },
+]
+cloud = [
+    { name = "modal" },
+]
+compare = [
+    { name = "snntorch" },
+]
+cuda = [
+    { name = "triton" },
+]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+tracking = [
+    { name = "wandb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "modal", marker = "extra == 'cloud'" },
+    { name = "numpy", specifier = ">=1.24.4" },
+    { name = "numpy", marker = "extra == 'bench'" },
+    { name = "pyright", marker = "extra == 'dev'" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "snntorch", marker = "extra == 'compare'", specifier = ">=0.9.4" },
+    { name = "torch" },
+    { name = "torchvision", specifier = ">=0.27.0" },
+    { name = "triton", marker = "extra == 'cuda'" },
+    { name = "wandb", marker = "extra == 'tracking'" },
+]
+provides-extras = ["cuda", "bench", "dev", "tracking", "compare", "cloud"]
+
+[[package]]
 name = "networkx"
 version = "2.8.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1598,54 +1646,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/53/a7/ce6eec2007d505612
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/a6/c9ca7a9a335a302694f0a86d5235fcba797283f94d5cd835e1dc8efdc905/snntorch-0.9.4-py2.py3-none-any.whl", hash = "sha256:34805e8d9d3d50fa8d28eb8ee715d9196a4db115cefe497e026b3ce1b7884388", size = 125619, upload-time = "2025-02-16T21:25:59.057Z" },
 ]
-
-[[package]]
-name = "spiker"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy" },
-    { name = "torch" },
-    { name = "torchvision" },
-]
-
-[package.optional-dependencies]
-bench = [
-    { name = "numpy" },
-]
-cloud = [
-    { name = "modal" },
-]
-compare = [
-    { name = "snntorch" },
-]
-cuda = [
-    { name = "triton" },
-]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-tracking = [
-    { name = "wandb" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "modal", marker = "extra == 'cloud'" },
-    { name = "numpy", specifier = ">=1.24.4" },
-    { name = "numpy", marker = "extra == 'bench'" },
-    { name = "pyright", marker = "extra == 'dev'" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "ruff", marker = "extra == 'dev'" },
-    { name = "snntorch", marker = "extra == 'compare'", specifier = ">=0.9.4" },
-    { name = "torch" },
-    { name = "torchvision", specifier = ">=0.27.0" },
-    { name = "triton", marker = "extra == 'cuda'" },
-    { name = "wandb", marker = "extra == 'tracking'" },
-]
-provides-extras = ["cuda", "bench", "dev", "tracking", "compare", "cloud"]
 
 [[package]]
 name = "sympy"

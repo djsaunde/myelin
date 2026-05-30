@@ -6,7 +6,7 @@
     -127,
     -82
   ],
-  "format": "spiker.dense_lif_quantized.v0",
+  "format": "myelin.dense_lif_quantized.v0",
   "input_size": 3,
   "layer_type": "dense_lif",
   "metadata": {
@@ -27,7 +27,7 @@
     "scheme": "signed_symmetric_per_tensor",
     "weight_scale": 0.0007522429420253424
   },
-  "source_format": "spiker.dense_lif.v0",
+  "source_format": "myelin.dense_lif.v0",
   "timestep": {
     "dt": 0.001
   },

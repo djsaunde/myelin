@@ -11,8 +11,8 @@ from urllib.request import urlretrieve
 
 import modal
 
-APP_NAME = "spiker-spikegpt"
-REMOTE_ROOT = "/root/spiker"
+APP_NAME = "myelin-spikegpt"
+REMOTE_ROOT = "/root/myelin"
 DATA_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 
 GPU = "H100"
@@ -141,7 +141,7 @@ def run_h100(
     eval_batches: int = 1,
     activation_checkpointing: bool = False,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Run a single-GPU SpikeGPT probe on H100."""
 
@@ -182,7 +182,7 @@ def main(
     eval_batches: int = 1,
     activation_checkpointing: bool = False,
     wandb: bool = False,
-    wandb_project: str = "spiker",
+    wandb_project: str = "myelin",
 ) -> None:
     """Launch a single-GPU Modal SpikeGPT training probe."""
 

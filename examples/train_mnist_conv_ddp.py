@@ -178,7 +178,7 @@ def main() -> None:
     parser.add_argument("--train-limit", type=int)
     parser.add_argument("--test-limit", type=int)
     parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--synapse-init", choices=("spiker", "fan_in"), default="fan_in")
+    parser.add_argument("--synapse-init", choices=("myelin", "fan_in"), default="fan_in")
     add_matmul_precision_arg(parser)
     add_wandb_args(parser)
     args = parser.parse_args()

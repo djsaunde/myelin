@@ -23,7 +23,7 @@ from example_utils import (
     resolve_compile_policy,
 )
 
-from spiker import LinearSurrogateLIF, SpikeRateLoss, fast_sigmoid_surrogate
+from myelin import LinearSurrogateLIF, SpikeRateLoss, fast_sigmoid_surrogate
 
 
 def synchronize_if_needed(device: str) -> None:

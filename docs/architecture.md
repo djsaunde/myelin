@@ -2,7 +2,7 @@
 
 ## Direction
 
-`spiker` is designed around fused simulation across time. The intended path is:
+`myelin` is designed around fused simulation across time. The intended path is:
 
 1. Define neuron dynamics with a restricted Python DSL.
 2. Lower the DSL to a backend-agnostic IR.
@@ -16,25 +16,25 @@ correctness oracle for future generated kernels and should stay simple.
 
 The current backend boundary is deliberately narrow:
 
-- `spiker.functional.lif_unroll`, `surrogate_lif_unroll`, and
+- `myelin.functional.lif_unroll`, `surrogate_lif_unroll`, and
   `surrogate_alif_unroll` are the PyTorch reference implementations.
-- `spiker.triton.lif_forward` is the raw fused-time CUDA/Triton forward kernel.
-- `spiker.autograd.triton_lif_forward_function` wraps the Triton forward kernel
+- `myelin.triton.lif_forward` is the raw fused-time CUDA/Triton forward kernel.
+- `myelin.autograd.triton_lif_forward_function` wraps the Triton forward kernel
   in a custom `torch.autograd.Function`. Its backward currently replays the
   PyTorch reference for exact final-membrane gradients.
-- `spiker.autograd.triton_surrogate_lif_function` uses the same Triton forward
+- `myelin.autograd.triton_surrogate_lif_function` uses the same Triton forward
   family with saved pre-reset membranes and a fused reverse-time Triton
   backward kernel for spike-output gradients.
-- `spiker.autograd.generated_triton_surrogate_lif_function` keeps the same
+- `myelin.autograd.generated_triton_surrogate_lif_function` keeps the same
   forward boundary but replaces the handwritten surrogate backward with a
   DSL/codegen-generated reverse-time Triton kernel.
-- `spiker.autograd.generated_triton_linear_surrogate_lif_function` extends that
+- `myelin.autograd.generated_triton_linear_surrogate_lif_function` extends that
   generated backward foothold to fused dense synapse training for the
   `dinputs`/`dweight`/`dbias` path.
-- `spiker.autograd.generated_triton_linear_surrogate_lif_checkpoint_function`
+- `myelin.autograd.generated_triton_linear_surrogate_lif_checkpoint_function`
   extends the generated backward path to checkpointed fused dense-synapse
   training by generating the reverse-time chunk kernel.
-- `spiker.kernels.lif_forward`, `alif_forward`, `surrogate_lif_forward`,
+- `myelin.kernels.lif_forward`, `alif_forward`, `surrogate_lif_forward`,
   `surrogate_alif_forward`, and `linear_surrogate_lif_forward` are the public
   dispatchers for `backend="torch"` and `backend="auto"`. `lif_forward`,
   surrogate LIF, and linear surrogate LIF support `backend="triton"`;
@@ -42,7 +42,7 @@ The current backend boundary is deliberately narrow:
   `backend="triton_generated"` as explicit opt-in generated paths.
   `surrogate_alif_forward` is currently torch-only and raises for Triton
   backends until the planned ALIF generated backward kernel exists.
-- `spiker.modules.TimeUnroll` uses the dispatchers for hard LIF, ALIF,
+- `myelin.modules.TimeUnroll` uses the dispatchers for hard LIF, ALIF,
   hard-forward surrogate LIF, and hard-forward surrogate ALIF cells.
 
 This keeps correctness, raw kernels, autograd integration, and module-level API
@@ -56,7 +56,7 @@ backend interface instead of coupling generated code directly to modules.
 - CPU tensor: use PyTorch without warning.
 
 Optional dependency availability is intentionally cached at module import time
-in `spiker._optional`. This keeps `backend="auto"` from calling
+in `myelin._optional`. This keeps `backend="auto"` from calling
 `importlib.find_spec` inside model forwards, which is important for
 `torch.compile(fullgraph=True)` compatibility.
 
@@ -94,7 +94,7 @@ The initial tensor convention is `[T, B, N]` for time, batch, and neurons.
 
 ## Neuron DSL v0
 
-`spiker.dsl` is the first narrow DSL/IR foothold. It represents neuron dynamics
+`myelin.dsl` is the first narrow DSL/IR foothold. It represents neuron dynamics
 as pointwise expression graphs over named state, input, and parameter values.
 The current public builder is `lif_ir()`, which lowers hard-reset LIF into:
 
@@ -125,7 +125,7 @@ is also public for checking individual expression nodes when building custom
 tools on top of the DSL.
 
 ```python
-from spiker.dsl import NeuronBuilder, where
+from myelin.dsl import NeuronBuilder, where
 
 builder = NeuronBuilder("custom_lif")
 membrane = builder.state("membrane")
@@ -145,7 +145,7 @@ ir = builder.build(
 The CPU oracle for time-major inputs is `evaluate_neuron_unroll`:
 
 ```python
-from spiker import evaluate_neuron_unroll
+from myelin import evaluate_neuron_unroll
 
 final_state, spikes = evaluate_neuron_unroll(
     ir,
@@ -158,7 +158,7 @@ final_state, spikes = evaluate_neuron_unroll(
 On CUDA, the same custom IR can be passed to the generated forward helper:
 
 ```python
-from spiker.triton import generated_neuron_forward
+from myelin.triton import generated_neuron_forward
 
 final_state, spikes = generated_neuron_forward(
     ir,
@@ -171,7 +171,7 @@ final_state, spikes = generated_neuron_forward(
 For module code, wrap the same IR in `CustomNeuronCell` and use `TimeUnroll`:
 
 ```python
-from spiker import CustomNeuronCell, TimeUnroll
+from myelin import CustomNeuronCell, TimeUnroll
 
 cell = CustomNeuronCell(ir, {"decay": 0.9, "threshold": 1.0, "reset": 0.0})
 unroll = TimeUnroll(cell, backend="auto")
@@ -223,7 +223,7 @@ trainable dense projection; with `stream_synapse=True`, it calls the same fused
 dense-synapse surrogate LIF backend used by `LinearSurrogateLIF`.
 `LinearCustomSurrogateNeuronRate` exposes the corresponding direct spike-rate
 readout path, matching `LinearSurrogateLIFRate`.
-`spiker.benchmarks.custom_surrogate_training` compares both the cell wrapper
+`myelin.benchmarks.custom_surrogate_training` compares both the cell wrapper
 and the dense linear/rate wrappers against the built-in surrogate LIF paths and
 reports loss, final-state, input-gradient, weight-gradient, and bias-gradient
 agreement where those quantities apply. It also prints a direct pairwise
@@ -237,7 +237,7 @@ refractory LIF proves counter-like state updates encoded with pointwise `where`
 expressions instead of Python control flow. Each variant runs first through the
 PyTorch evaluator and then through `CustomNeuronCell`/`TimeUnroll`; on CUDA with
 Triton installed, `backend="auto"` uses the generic generated forward launcher.
-The `spiker.benchmarks.custom_neuron_module` benchmark times this public module
+The `myelin.benchmarks.custom_neuron_module` benchmark times this public module
 path and records correctness against the evaluator oracle. Its combined
 `--variant all` mode keeps the LIF, ALIF, and refractory-LIF composability proof
 in one artifact, including per-variant speedups, state error, and spike mismatch
@@ -246,12 +246,12 @@ generated backward ABI only supports hard-reset LIF-shaped custom IRs. ALIF now
 has an explicit unimplemented backward plan, while refractory LIF and richer
 custom dynamics remain future work for generic generated backward.
 
-`spiker.codegen` lowers this IR to a deterministic SSA-like fragment. For LIF,
+`myelin.codegen` lowers this IR to a deterministic SSA-like fragment. For LIF,
 the current lowering produces temporaries for membrane decay, pre-reset
 membrane, threshold comparison, reset selection, and spike output. It can render
 Python-style fragments (`torch.where`) and Triton-style fragments (`tl.where`),
 and it can render a Triton step-body fragment with kernel-local variable names.
-`spiker.triton.generated` now splices lowered step bodies into full fused-time
+`myelin.triton.generated` now splices lowered step bodies into full fused-time
 Triton forward kernel sources, loads them through `triton.jit`, and verifies
 them against reference unrolls. The renderer is shared across neuron IRs: state
 names become initial/final state pointers, parameter names become constexpr
@@ -271,7 +271,7 @@ next_adaptation = adaptation * adaptation_decay + spike
 
 The existing IR/evaluator/codegen path handles this without new operators, and
 ALIF now emits and runs through the same generated fused-time Triton forward
-template as LIF. It is also exposed through `spiker.kernels.alif_forward` and
+template as LIF. It is also exposed through `myelin.kernels.alif_forward` and
 `TimeUnroll(ALIFCell(...), backend="triton_generated")`, so the composability
 proof reaches the same public dispatch surface instead of stopping at raw
 kernel helpers. That is the intended M2 direction: new pointwise neuron dynamics
@@ -289,7 +289,7 @@ spike = pre_reset_voltage >= threshold
 ```
 
 This goes through the same evaluator and generated fused-time Triton forward
-path via `izhikevich_ir()` and `spiker.kernels.izhikevich_forward`. It is still
+path via `izhikevich_ir()` and `myelin.kernels.izhikevich_forward`. It is still
 inside the v1 DSL boundary because the update is pointwise and keeps all state
 in fixed-shape tensors.
 
@@ -325,7 +325,7 @@ a scalar loss from inside the compiled graph. Public dense-output Triton paths
 return `[T, B, N]` spikes to Python before the loss consumes them, so they have a
 dense-output allocation lower bound that the scalar compiled graph can avoid.
 
-`spiker.benchmarks.compile_inspect` is the current way to inspect that behavior
+`myelin.benchmarks.compile_inspect` is the current way to inspect that behavior
 instead of guessing. On the CUDA smoke shape (`T=16, B=8, F=16, N=32`), the
 compiled materialized workload had one Dynamo graph, no graph breaks, two
 Inductor Triton kernels, two `extern_kernels.mm` calls, 24 CUDA allocation
@@ -428,7 +428,7 @@ paths had a forward increment of only 2.0 MB and a backward increment of
 specialized output contract rather than a replacement for dense spike-output
 BPTT.
 
-`spiker.benchmarks.scalar_loss_boundary` is the current like-for-like-ish
+`myelin.benchmarks.scalar_loss_boundary` is the current like-for-like-ish
 latency probe against `torch.compile`'s scalar-loss graph. It keeps the
 Triton rate objective inside the checkpointed backend boundary instead of
 returning dense spikes. On the shared RTX 5090 shape with
@@ -444,7 +444,7 @@ thresholded spikes in forward and a fast-sigmoid straight-through gradient,
 making it a closer semantic comparison to the Triton hard-forward surrogate path
 than the older soft-forward rows.
 
-`spiker.benchmarks.checkpoint_size_sweep` now includes that replay-rate path
+`myelin.benchmarks.checkpoint_size_sweep` now includes that replay-rate path
 across chunk sizes and prints the rate-output Pareto frontier. The result is
 useful but not a new default: checkpoint `5` replay-rate took 1.339 ms with an
 11.5 MB increment, while the scratch-backed rate path at checkpoint `10` took
@@ -464,7 +464,7 @@ rendering, `exec`, and `linecache` mutation inside the compiled autograd path.
 
 ## Bitpacked Spike Format
 
-`spiker.packing` defines the first M4 spike storage contract. Spikes are packed
+`myelin.packing` defines the first M4 spike storage contract. Spikes are packed
 along the last dimension into signed int32 words:
 
 ```text
@@ -495,7 +495,7 @@ supports packed-safe reductions such as `dim=(0, -1)` for per-batch counts or
 neuron dimension are available through `packed_spike_count`, which unpacks as a
 convenience path.
 
-`spiker.lif_forward_packed_spikes` is the public backend-selecting entry point
+`myelin.lif_forward_packed_spikes` is the public backend-selecting entry point
 for packed LIF forward. With CUDA tensors and Triton installed, it calls the
 direct Triton writer instead of materializing dense spikes. It stores 50.0 MB of
 dense spikes as 1.6 MB of packed words at `T=100, B=64, N=2048`. After batching
@@ -515,7 +515,7 @@ in BPTT kernels without unpacking to a dense saved tensor.
 
 ## Distributed Foothold
 
-`spiker.distributed` is the first M5 surface. It intentionally starts with the
+`myelin.distributed` is the first M5 surface. It intentionally starts with the
 packed spike format rather than a full training strategy:
 
 - `packed_spike_all_gather` all-gathers packed int32 spike words and preserves
@@ -531,7 +531,7 @@ packed spike format rather than a full training strategy:
 These helpers require an initialized `torch.distributed` process group. They do
 not replace tensor parallelism or custom sparse collectives yet; they make the
 packed activation representation and a conservative FSDP wrapping boundary
-usable from tested public primitives. `spiker.benchmarks.distributed_collectives`
+usable from tested public primitives. `myelin.benchmarks.distributed_collectives`
 is the first benchmark harness for this surface and now reports correctness
 columns next to timing: packed all-gather must unpack to the dense all-gather
 payload, and count/rate all-reduce must match dense count/rate reductions with
@@ -546,7 +546,7 @@ benchmark is still required before claiming distributed training speedups.
 
 ## Online Learning Foothold
 
-`spiker.online.linear_lif_online_eligibility_grad` is the first M6 reference
+`myelin.online.linear_lif_online_eligibility_grad` is the first M6 reference
 primitive. It accepts time-major dense inputs, dense output weights, optional
 bias, and a per-timestep learning signal interpreted as `dL/d spike`. It
 updates an eligibility trace online:
@@ -586,7 +586,7 @@ local update directly to the owned dense synapse parameters. They accept the
 same custom `SurrogateBuilder` derivative IRs as the functional helpers. This
 keeps online learning explicit and separate from autograd-based BPTT modules.
 
-`spiker.benchmarks.online_learning` compares the LIF/ALIF online update cost
+`myelin.benchmarks.online_learning` compares the LIF/ALIF online update cost
 against surrogate BPTT baselines on the same dense workload. It is meant to
 track the online-learning path independently from fused BPTT kernels. The
 benchmark also includes custom surrogate IR variants that alias the built-in
@@ -597,7 +597,7 @@ benchmark noise of the built-in derivative path at the current CUDA shape.
 
 ## Hardware Bridge Foothold
 
-`spiker.hardware` defines the first M7 export boundary:
+`myelin.hardware` defines the first M7 export boundary:
 
 ```text
 dense weight [F, N]
@@ -607,31 +607,31 @@ timestep metadata: dt
 string metadata
         |
         v
-spiker.dense_lif.v0 JSON artifact
+myelin.dense_lif.v0 JSON artifact
         |
         v
 signed symmetric fixed-point preparation
         |
         v
-spiker.dense_lif_quantized.v0 JSON artifact
+myelin.dense_lif_quantized.v0 JSON artifact
         |
         v
 generic core tiling / accumulator marking
         |
         v
-spiker.dense_lif_placement.v0 JSON artifact
+myelin.dense_lif_placement.v0 JSON artifact
         |
         v
 artifact manifest
         |
         v
-spiker.hardware_bundle.v0 JSON artifact
+myelin.hardware_bundle.v0 JSON artifact
         |
         v
 target adapter manifest
         |
         v
-spiker.spinnaker2_dense_lif_manifest.v0 JSON artifact
+myelin.spinnaker2_dense_lif_manifest.v0 JSON artifact
 ```
 
 `export_dense_lif_layer` accepts raw tensors plus `LIFParams` and returns a
@@ -658,7 +658,7 @@ reject.
 
 `export_linear_lif_hardware_bundle` runs this full generic pipeline for a
 `LinearLIF`-style module and writes the float export, quantized export,
-placement plan, and `spiker.hardware_bundle.v0` manifest into a single
+placement plan, and `myelin.hardware_bundle.v0` manifest into a single
 directory. The manifest keeps artifact filenames, format versions, target name,
 and summary counts together so a future SpiNNaker adapter has one stable entry
 point.
@@ -673,7 +673,7 @@ reproducible from one command.
 `export_spinnaker2_dense_lif_manifest` is the target-specific adapter artifact.
 It accepts a quantized dense LIF export plus a placement plan whose target is
 `spinnaker2`, validates per-core neuron and incoming-synapse limits, records
-timestep in milliseconds, and emits `spiker.spinnaker2_dense_lif_manifest.v0`.
+timestep in milliseconds, and emits `myelin.spinnaker2_dense_lif_manifest.v0`.
 The manifest references the generic quantized and placement artifacts instead of
 duplicating weights. Dense input shard accumulation is preserved in each mapping
 entry through `requires_accumulator` so a later SpiNNaker lowerer can decide how
@@ -699,8 +699,8 @@ for t in 0..T-1:
 spikes[T, B, N], final_state[B, N]
 ```
 
-For hard `LIFCell`, `TimeUnroll` can dispatch to `spiker.kernels.lif_forward`,
+For hard `LIFCell`, `TimeUnroll` can dispatch to `myelin.kernels.lif_forward`,
 which lets `backend="auto"` choose the fused Triton forward kernel on CUDA. For
 hard-forward `SurrogateLIFCell`, it can dispatch to
-`spiker.kernels.surrogate_lif_forward`; Triton handles the forward pass and the
+`myelin.kernels.surrogate_lif_forward`; Triton handles the forward pass and the
 custom autograd boundary dispatches to the fused Triton backward kernel.

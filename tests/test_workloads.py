@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import torch
 
-from spiker.neurons import LIFParams
-from spiker.workloads import (
+from myelin.neurons import LIFParams
+from myelin.workloads import (
     dense_fast_surrogate_lif_spike_loss,
     dense_hard_fast_surrogate_lif_spike_loss,
     dense_lif_loss,

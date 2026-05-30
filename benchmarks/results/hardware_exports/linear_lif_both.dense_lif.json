@@ -6,7 +6,7 @@
     -0.0067794108763337135,
     -0.0043546282686293125
   ],
-  "format": "spiker.dense_lif.v0",
+  "format": "myelin.dense_lif.v0",
   "input_size": 3,
   "layer_type": "dense_lif",
   "metadata": {

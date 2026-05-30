@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from spiker.checkpointing import (
+from myelin.checkpointing import (
     parse_checkpoint_size,
     recommended_checkpoint_size,
     resolve_checkpoint_size,

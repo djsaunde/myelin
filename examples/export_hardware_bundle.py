@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from example_utils import print_model_summary
 
-from spiker import (
+from myelin import (
     LIFParams,
     LinearLIF,
     export_linear_lif_hardware_bundle,

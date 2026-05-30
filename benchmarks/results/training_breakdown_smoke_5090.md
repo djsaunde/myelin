@@ -1,7 +1,7 @@
 <!-- benchmark_runner_name: training_breakdown -->
 <!-- benchmark_runner_started: 2026-05-24T15:55:08+00:00 -->
 <!-- benchmark_runner_finished: 2026-05-24T15:55:12+00:00 -->
-<!-- benchmark_runner_command: /home/danjs/code/spiker/.venv/bin/python3 -m spiker.benchmarks.training_breakdown --device cuda --timesteps 16 --batch 8 --features 16 --neurons 64 --checkpoint-size 4 --warmup 1 --repeats 1 --no-compile -->
+<!-- benchmark_runner_command: /home/danjs/code/myelin/.venv/bin/python3 -m myelin.benchmarks.training_breakdown --device cuda --timesteps 16 --batch 8 --features 16 --neurons 64 --checkpoint-size 4 --warmup 1 --repeats 1 --no-compile -->
 # Training Breakdown
 
 Breaks surrogate LIF training into projection, forward, and backward components.

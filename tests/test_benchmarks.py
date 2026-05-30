@@ -5,95 +5,95 @@ import argparse
 import pytest
 import torch
 
-from spiker.benchmarks.checkpoint_size_sweep import (
+from myelin.benchmarks.checkpoint_size_sweep import (
     SweepResult,
     parse_checkpoint_sizes,
     pre_reset_scratch_bytes,
     rate_pareto_frontier,
 )
-from spiker.benchmarks.compile_inspect import summarize_output_code
-from spiker.benchmarks.compile_triton_boundary import run_benchmark as run_compile_triton_boundary
-from spiker.benchmarks.compile_triton_sweep import (
+from myelin.benchmarks.compile_inspect import summarize_output_code
+from myelin.benchmarks.compile_triton_boundary import run_benchmark as run_compile_triton_boundary
+from myelin.benchmarks.compile_triton_sweep import (
     parse_shape as parse_compile_triton_sweep_shape,
 )
-from spiker.benchmarks.compile_triton_sweep import (
+from myelin.benchmarks.compile_triton_sweep import (
     run_benchmark as run_compile_triton_sweep,
 )
-from spiker.benchmarks.currents_audit import (
+from myelin.benchmarks.currents_audit import (
     AuditResult,
     expected_checkpoint_scratch_bytes,
     expected_chunk_start_bytes,
     exposes_dense_spike_output,
     make_triton_checkpoint_rate_step,
 )
-from spiker.benchmarks.currents_boundary import BoundaryResult, current_bytes, format_ratio
-from spiker.benchmarks.custom_neuron_module import (
+from myelin.benchmarks.currents_boundary import BoundaryResult, current_bytes, format_ratio
+from myelin.benchmarks.custom_neuron_module import (
     VARIANTS as CUSTOM_NEURON_VARIANTS,
 )
-from spiker.benchmarks.custom_neuron_module import (
+from myelin.benchmarks.custom_neuron_module import (
     build_variant_ir,
     initial_state_for_variant,
     params_for_variant,
 )
-from spiker.benchmarks.custom_surrogate_training import (
+from myelin.benchmarks.custom_surrogate_training import (
     params_from_decay,
     run_benchmark,
     run_pairwise_comparisons,
 )
-from spiker.benchmarks.headline import (
+from myelin.benchmarks.headline import (
     collect_headlines,
     parse_markdown_table,
     parse_scalar_metrics,
 )
-from spiker.benchmarks.mnist_compare import VARIANTS, parse_metrics, parse_variants, run_variant
-from spiker.benchmarks.mnist_rate_matrix import (
+from myelin.benchmarks.mnist_compare import VARIANTS, parse_metrics, parse_variants, run_variant
+from myelin.benchmarks.mnist_rate_matrix import (
     DEFAULT_SETTINGS,
     MatrixSetting,
     parse_setting,
     run_matrix,
 )
-from spiker.benchmarks.online_learning import (
+from myelin.benchmarks.online_learning import (
     alif_online_custom_surrogate_step,
     alif_online_step,
     lif_online_custom_surrogate_step,
     lif_online_step,
 )
-from spiker.benchmarks.performance_frontier import run_benchmark as run_frontier_benchmark
-from spiker.benchmarks.runner import PRESETS, make_runs
-from spiker.benchmarks.scalar_loss_boundary import ScalarLossResult
-from spiker.benchmarks.snntorch_matrix import (
+from myelin.benchmarks.performance_frontier import run_benchmark as run_frontier_benchmark
+from myelin.benchmarks.runner import PRESETS, make_runs
+from myelin.benchmarks.scalar_loss_boundary import ScalarLossResult
+from myelin.benchmarks.snntorch_matrix import (
     TimestepSetting,
     parse_timesteps,
 )
-from spiker.benchmarks.snntorch_matrix import (
+from myelin.benchmarks.snntorch_matrix import (
     run_matrix as run_snntorch_matrix,
 )
-from spiker.benchmarks.spikegpt_compile_probe import (
+from myelin.benchmarks.spikegpt_compile_probe import (
     CompileProbeRow,
 )
-from spiker.benchmarks.spikegpt_compile_probe import (
+from myelin.benchmarks.spikegpt_compile_probe import (
     print_markdown as print_spikegpt_compile_probe_markdown,
 )
-from spiker.benchmarks.spikegpt_generation import run_benchmark as run_spikegpt_generation
-from spiker.benchmarks.spikegpt_training import run_benchmark as run_spikegpt_training
-from spiker.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
-from spiker.benchmarks.two_layer_recompute import (
+from myelin.benchmarks.spikegpt_generation import run_benchmark as run_spikegpt_generation
+from myelin.benchmarks.spikegpt_training import run_benchmark as run_spikegpt_training
+from myelin.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
+from myelin.benchmarks.two_layer_recompute import (
     BenchRow as TwoLayerBenchRow,
 )
-from spiker.benchmarks.two_layer_recompute import (
+from myelin.benchmarks.two_layer_recompute import (
     Shape as TwoLayerShape,
 )
-from spiker.benchmarks.two_layer_recompute import (
+from myelin.benchmarks.two_layer_recompute import (
     parse_shape as parse_two_layer_shape,
 )
-from spiker.benchmarks.two_layer_recompute import (
+from myelin.benchmarks.two_layer_recompute import (
     run_benchmark as run_two_layer_recompute,
 )
-from spiker.benchmarks.two_layer_recompute import (
+from myelin.benchmarks.two_layer_recompute import (
     summarize_result as summarize_two_layer_result,
 )
-from spiker.dsl import analyze_neuron_ir, evaluate_neuron_unroll
-from spiker.neurons import LIFParams
+from myelin.dsl import analyze_neuron_ir, evaluate_neuron_unroll
+from myelin.neurons import LIFParams
 
 pytestmark = pytest.mark.extended
 
@@ -204,7 +204,7 @@ def test_currents_audit_rate_step_uses_public_rate_forward(
 
         return State(), weight.sum() * 0.0 + torch.tensor(0.5)
 
-    import spiker.kernels as kernels
+    import myelin.kernels as kernels
 
     monkeypatch.setattr(kernels, "linear_surrogate_lif_rate_forward", fake_rate_forward)
     step = make_triton_checkpoint_rate_step(
@@ -236,7 +236,7 @@ def test_currents_audit_rate_step_uses_public_rate_forward(
 def test_torch_rate_forward_does_not_call_dense_spike_forward(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.kernels as kernels
+    import myelin.kernels as kernels
 
     def fail_dense_forward(*_args: object, **_kwargs: object) -> tuple[object, torch.Tensor]:
         raise AssertionError("dense spike forward should not be used by torch rate backend")
@@ -512,7 +512,7 @@ def test_mnist_compare_threads_checkpoint_size_to_rate_variants(
         snntorch_beta=0.95,
         conv_synapse_init=None,
         compile=True,
-        compile_spiker_only=False,
+        compile_myelin_only=False,
         smooth_forward=False,
     )
 
@@ -562,7 +562,7 @@ def test_mnist_rate_matrix_threads_settings_and_variants(monkeypatch: pytest.Mon
         snntorch_beta=0.95,
         conv_synapse_init=None,
         compile=False,
-        compile_spiker_only=True,
+        compile_myelin_only=True,
         smooth_forward=False,
     )
 
@@ -702,7 +702,7 @@ def test_snntorch_matrix_threads_timesteps_and_variants(monkeypatch: pytest.Monk
         matmul_precision="highest",
         smooth_forward=False,
         compile=False,
-        compile_spiker_only=True,
+        compile_myelin_only=True,
         conv_synapse_init="fan_in",
         log_every=100,
         eval_every=100,
@@ -904,7 +904,7 @@ def test_benchmark_runner_resolves_artifact_paths(tmp_path) -> None:
     assert runs[0].command[:3] == (
         runs[0].command[0],
         "-m",
-        "spiker.benchmarks.generated_forward",
+        "myelin.benchmarks.generated_forward",
     )
     assert runs[0].command[3:5] == ("--device", "cuda")
     assert runs[0].output_path == tmp_path / "generated_forward_smoke_unit.md"
@@ -1100,7 +1100,7 @@ def test_distributed_collectives_benchmark_smoke() -> None:
         [
             sys.executable,
             "-m",
-            "spiker.benchmarks.distributed_collectives",
+            "myelin.benchmarks.distributed_collectives",
             "--timesteps",
             "2",
             "--batch",

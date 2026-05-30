@@ -17,7 +17,7 @@ metric and the practical effect of avoiding dense output spikes.
 - `grad_clip`: `0.1`
 - `train_limit`: `512`
 - `test_limit`: `512`
-- `compile_spiker_only`: `True`
+- `compile_myelin_only`: `True`
 - `matmul_precision`: `highest`
 
 ## Results

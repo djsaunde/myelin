@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker._optional import has_triton
-from spiker.functional import alif_unroll, izhikevich_unroll, lif_unroll, surrogate_lif_unroll
-from spiker.neurons import (
+from myelin._optional import has_triton
+from myelin.functional import alif_unroll, izhikevich_unroll, lif_unroll, surrogate_lif_unroll
+from myelin.neurons import (
     ALIFParams,
     ALIFState,
     IzhikevichParams,
@@ -13,7 +13,7 @@ from spiker.neurons import (
     LIFParams,
     LIFState,
 )
-from spiker.surrogates import (
+from myelin.surrogates import (
     atan_surrogate,
     fast_sigmoid_surrogate,
     multi_gaussian_surrogate,
@@ -34,7 +34,7 @@ REPRESENTATIVE_SURROGATE_NAMES = ("fast_sigmoid", "multi_gaussian")
 def test_generated_kernel_cache_skips_source_factory_on_hit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from spiker.triton import generated as generated_module
+    from myelin.triton import generated as generated_module
 
     compiled_kernel = object()
     sources: list[str] = []
@@ -76,7 +76,7 @@ def test_generated_kernel_cache_skips_source_factory_on_hit(
 
 
 def test_triton_lif_forward_matches_reference() -> None:
-    from spiker.triton import lif_forward
+    from myelin.triton import lif_forward
 
     torch.manual_seed(0)
     inputs = torch.rand((7, 3, 19), device="cuda")
@@ -92,7 +92,7 @@ def test_triton_lif_forward_matches_reference() -> None:
 
 @pytest.mark.parametrize("neurons", [1, 31, 32, 33, 65])
 def test_triton_lif_forward_packed_spikes_matches_dense_forward(neurons: int) -> None:
-    from spiker.triton import lif_forward, lif_forward_packed_spikes, unpack_spikes_triton
+    from myelin.triton import lif_forward, lif_forward_packed_spikes, unpack_spikes_triton
 
     torch.manual_seed(10 + neurons)
     inputs = torch.rand((7, 3, neurons), device="cuda")
@@ -108,8 +108,8 @@ def test_triton_lif_forward_packed_spikes_matches_dense_forward(neurons: int) ->
 
 
 def test_public_lif_forward_packed_spikes_auto_backend_matches_dense_forward() -> None:
-    from spiker.kernels import lif_forward_packed_spikes
-    from spiker.triton import lif_forward, unpack_spikes_triton
+    from myelin.kernels import lif_forward_packed_spikes
+    from myelin.triton import lif_forward, unpack_spikes_triton
 
     torch.manual_seed(12)
     inputs = torch.rand((7, 3, 65), device="cuda")
@@ -126,7 +126,7 @@ def test_public_lif_forward_packed_spikes_auto_backend_matches_dense_forward() -
 
 @pytest.mark.parametrize("neurons", [31, 32, 33])
 def test_linear_checkpoint_packed_forward_matches_dense_checkpoint_forward(neurons: int) -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         linear_surrogate_lif_checkpoint_forward,
         linear_surrogate_lif_checkpoint_packed_forward,
         unpack_spikes_triton,
@@ -166,7 +166,7 @@ def test_linear_checkpoint_packed_forward_matches_dense_checkpoint_forward(neuro
 
 
 def test_generated_lif_forward_source_contains_dsl_step_body() -> None:
-    from spiker.triton import render_lif_forward_kernel_source
+    from myelin.triton import render_lif_forward_kernel_source
 
     source = render_lif_forward_kernel_source()
 
@@ -178,7 +178,7 @@ def test_generated_lif_forward_source_contains_dsl_step_body() -> None:
 
 
 def test_generated_lif_surrogate_backward_source_contains_codegen_step() -> None:
-    from spiker.triton import render_lif_surrogate_backward_kernel_source
+    from myelin.triton import render_lif_surrogate_backward_kernel_source
 
     source = render_lif_surrogate_backward_kernel_source("fast_sigmoid")
 
@@ -192,7 +192,7 @@ def test_generated_lif_surrogate_backward_source_contains_codegen_step() -> None
 
 
 def test_generated_lif_surrogate_backward_packed_spikes_source_contains_codegen_step() -> None:
-    from spiker.triton import render_lif_surrogate_backward_packed_spikes_kernel_source
+    from myelin.triton import render_lif_surrogate_backward_packed_spikes_kernel_source
 
     source = render_lif_surrogate_backward_packed_spikes_kernel_source("fast_sigmoid")
 
@@ -207,7 +207,7 @@ def test_generated_lif_surrogate_backward_packed_spikes_source_contains_codegen_
 
 
 def test_generated_linear_lif_surrogate_backward_source_contains_codegen_step() -> None:
-    from spiker.triton import render_linear_lif_surrogate_backward_weight_bias_kernel_source
+    from myelin.triton import render_linear_lif_surrogate_backward_weight_bias_kernel_source
 
     source = render_linear_lif_surrogate_backward_weight_bias_kernel_source("fast_sigmoid")
 
@@ -224,7 +224,7 @@ def test_generated_linear_lif_surrogate_backward_source_contains_codegen_step() 
 def test_generated_linear_lif_surrogate_backward_packed_spikes_source_contains_codegen_step() -> (
     None
 ):
-    from spiker.triton import (
+    from myelin.triton import (
         render_linear_lif_surrogate_backward_weight_bias_packed_spikes_kernel_source,
     )
 
@@ -242,7 +242,7 @@ def test_generated_linear_lif_surrogate_backward_packed_spikes_source_contains_c
 
 
 def test_generated_linear_lif_surrogate_checkpoint_backward_source_contains_codegen_step() -> None:
-    from spiker.triton import render_linear_lif_surrogate_checkpoint_backward_chunk_kernel_source
+    from myelin.triton import render_linear_lif_surrogate_checkpoint_backward_chunk_kernel_source
 
     source = render_linear_lif_surrogate_checkpoint_backward_chunk_kernel_source("fast_sigmoid")
 
@@ -257,7 +257,7 @@ def test_generated_linear_lif_surrogate_checkpoint_backward_source_contains_code
 
 
 def test_generated_checkpoint_backward_packed_spikes_source_contains_codegen_step() -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         render_linear_lif_surrogate_checkpoint_backward_chunk_packed_spikes_kernel_source,
     )
 
@@ -276,8 +276,8 @@ def test_generated_checkpoint_backward_packed_spikes_source_contains_codegen_ste
 
 
 def test_generic_generated_forward_renderer_uses_ir_boundary() -> None:
-    from spiker.dsl import lif_ir
-    from spiker.triton import render_forward_kernel_source
+    from myelin.dsl import lif_ir
+    from myelin.triton import render_forward_kernel_source
 
     source = render_forward_kernel_source(
         lif_ir(),
@@ -293,7 +293,7 @@ def test_generic_generated_forward_renderer_uses_ir_boundary() -> None:
 
 
 def test_generated_izhikevich_forward_matches_reference() -> None:
-    from spiker.triton import generated_izhikevich_forward
+    from myelin.triton import generated_izhikevich_forward
 
     torch.manual_seed(13)
     inputs = torch.rand((7, 3, 19), device="cuda") * 20.0
@@ -317,14 +317,14 @@ def test_generated_izhikevich_forward_matches_reference() -> None:
 
 
 def test_generated_kernel_loader_reuses_cached_function() -> None:
-    from spiker.triton import load_generated_alif_forward_kernel, load_generated_lif_forward_kernel
+    from myelin.triton import load_generated_alif_forward_kernel, load_generated_lif_forward_kernel
 
     assert load_generated_lif_forward_kernel() is load_generated_lif_forward_kernel()
     assert load_generated_alif_forward_kernel() is load_generated_alif_forward_kernel()
 
 
 def test_generated_lif_forward_matches_reference() -> None:
-    from spiker.triton import generated_lif_forward
+    from myelin.triton import generated_lif_forward
 
     torch.manual_seed(1)
     inputs = torch.rand((7, 3, 19), device="cuda")
@@ -339,8 +339,8 @@ def test_generated_lif_forward_matches_reference() -> None:
 
 
 def test_generic_generated_forward_launcher_matches_lif_reference() -> None:
-    from spiker.dsl import lif_ir
-    from spiker.triton import generated_forward, load_generated_lif_forward_kernel
+    from myelin.dsl import lif_ir
+    from myelin.triton import generated_forward, load_generated_lif_forward_kernel
 
     torch.manual_seed(11)
     inputs = torch.rand((5, 2, 13), device="cuda")
@@ -367,8 +367,8 @@ def test_generic_generated_forward_launcher_matches_lif_reference() -> None:
 
 
 def test_neuron_builder_ir_runs_through_generated_forward_launcher() -> None:
-    from spiker.dsl import NeuronBuilder, evaluate_neuron_unroll, where
-    from spiker.triton import (
+    from myelin.dsl import NeuronBuilder, evaluate_neuron_unroll, where
+    from myelin.triton import (
         generated_forward,
         load_generated_neuron_forward_kernel,
     )
@@ -416,8 +416,8 @@ def test_neuron_builder_ir_runs_through_generated_forward_launcher() -> None:
 def test_generated_custom_forward_kernel_cache_skips_re_render(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.triton.generated as generated
-    from spiker.dsl import NeuronBuilder, where
+    import myelin.triton.generated as generated
+    from myelin.dsl import NeuronBuilder, where
 
     builder = NeuronBuilder("custom_lif_cache_probe")
     membrane = builder.state("membrane")
@@ -450,8 +450,8 @@ def test_generated_custom_forward_kernel_cache_skips_re_render(
 
 
 def test_neuron_builder_ir_runs_through_generated_neuron_forward_wrapper() -> None:
-    from spiker.dsl import NeuronBuilder, evaluate_neuron_unroll, where
-    from spiker.triton import generated_neuron_forward
+    from myelin.dsl import NeuronBuilder, evaluate_neuron_unroll, where
+    from myelin.triton import generated_neuron_forward
 
     builder = NeuronBuilder("custom_lif_wrapper")
     membrane = builder.state("membrane")
@@ -491,8 +491,8 @@ def test_neuron_builder_ir_runs_through_generated_neuron_forward_wrapper() -> No
 
 
 def test_generated_custom_forward_rejects_ir_shapes_outside_current_abi() -> None:
-    from spiker.dsl import NeuronIR, const, input_, state
-    from spiker.triton.generated import render_forward_kernel_source
+    from myelin.dsl import NeuronIR, const, input_, state
+    from myelin.triton.generated import render_forward_kernel_source
 
     stateless = NeuronIR(
         name="stateless",
@@ -529,8 +529,8 @@ def test_generated_custom_forward_rejects_ir_shapes_outside_current_abi() -> Non
 
 
 def test_generated_custom_forward_rejects_unexpected_launch_inputs() -> None:
-    from spiker.dsl import NeuronBuilder, where
-    from spiker.triton import generated_neuron_forward
+    from myelin.dsl import NeuronBuilder, where
+    from myelin.triton import generated_neuron_forward
 
     builder = NeuronBuilder("custom_lif_strict_launch")
     membrane = builder.state("membrane")
@@ -578,8 +578,8 @@ def test_generated_custom_forward_rejects_unexpected_launch_inputs() -> None:
 
 
 def test_custom_neuron_cell_auto_backend_uses_generated_triton_path_on_cuda() -> None:
-    from spiker.dsl import NeuronBuilder, evaluate_neuron_unroll, where
-    from spiker.modules import CustomNeuronCell, TimeUnroll
+    from myelin.dsl import NeuronBuilder, evaluate_neuron_unroll, where
+    from myelin.modules import CustomNeuronCell, TimeUnroll
 
     builder = NeuronBuilder("module_custom_lif_cuda")
     membrane = builder.state("membrane")
@@ -612,7 +612,7 @@ def test_custom_neuron_cell_auto_backend_uses_generated_triton_path_on_cuda() ->
 
 
 def test_generated_alif_forward_source_contains_dsl_step_body() -> None:
-    from spiker.triton import render_alif_forward_kernel_source
+    from myelin.triton import render_alif_forward_kernel_source
 
     source = render_alif_forward_kernel_source()
 
@@ -625,7 +625,7 @@ def test_generated_alif_forward_source_contains_dsl_step_body() -> None:
 
 
 def test_generated_alif_forward_matches_reference() -> None:
-    from spiker.triton import generated_alif_forward
+    from myelin.triton import generated_alif_forward
 
     torch.manual_seed(2)
     inputs = torch.rand((9, 4, 23), device="cuda")
@@ -655,7 +655,7 @@ def test_generated_alif_forward_matches_reference() -> None:
 
 
 def test_generated_alif_backend_forward_matches_reference() -> None:
-    from spiker.kernels import alif_forward
+    from myelin.kernels import alif_forward
 
     torch.manual_seed(3)
     inputs = torch.rand((9, 4, 23), device="cuda")
@@ -691,7 +691,7 @@ def test_generated_alif_backend_forward_matches_reference() -> None:
 
 
 def test_time_unroll_alif_generated_backend_matches_reference() -> None:
-    from spiker.modules import ALIFCell, TimeUnroll
+    from myelin.modules import ALIFCell, TimeUnroll
 
     torch.manual_seed(4)
     inputs = torch.rand((9, 4, 23), device="cuda")
@@ -736,7 +736,7 @@ def test_triton_lif_forward_matches_reference_across_shapes(
     params: LIFParams,
     block_size: int,
 ) -> None:
-    from spiker.triton import lif_forward
+    from myelin.triton import lif_forward
 
     torch.manual_seed(sum(shape) + block_size)
     timesteps, batch, neurons = shape
@@ -751,7 +751,7 @@ def test_triton_lif_forward_matches_reference_across_shapes(
 
 
 def test_triton_lif_forward_handles_partial_blocks() -> None:
-    from spiker.triton import lif_forward
+    from myelin.triton import lif_forward
 
     inputs = torch.full((4, 2, 13), 0.6, device="cuda")
     initial = LIFState(membrane=torch.zeros((2, 13), device="cuda"))
@@ -765,7 +765,7 @@ def test_triton_lif_forward_handles_partial_blocks() -> None:
 
 
 def test_backend_lif_forward_auto_matches_reference() -> None:
-    from spiker.kernels import lif_forward
+    from myelin.kernels import lif_forward
 
     torch.manual_seed(12)
     inputs = torch.rand((5, 2, 17), device="cuda")
@@ -780,7 +780,7 @@ def test_backend_lif_forward_auto_matches_reference() -> None:
 
 
 def test_autograd_boundary_forward_matches_reference() -> None:
-    from spiker.autograd import triton_lif_forward_function
+    from myelin.autograd import triton_lif_forward_function
 
     torch.manual_seed(21)
     inputs = torch.rand((6, 2, 9), device="cuda")
@@ -800,7 +800,7 @@ def test_autograd_boundary_forward_matches_reference() -> None:
 
 
 def test_autograd_boundary_backward_matches_reference_for_final_membrane() -> None:
-    from spiker.kernels import lif_forward
+    from myelin.kernels import lif_forward
 
     torch.manual_seed(31)
     inputs = torch.rand((5, 2, 7), device="cuda", requires_grad=True)
@@ -842,7 +842,7 @@ def test_autograd_boundary_backward_matches_reference_for_final_membrane() -> No
 
 
 def test_autograd_boundary_spike_backward_raises_clear_error() -> None:
-    from spiker.kernels import lif_forward
+    from myelin.kernels import lif_forward
 
     inputs = torch.rand((4, 2, 7), device="cuda", requires_grad=True)
     initial = LIFState(membrane=torch.zeros((2, 7), device="cuda"))
@@ -856,7 +856,7 @@ def test_autograd_boundary_spike_backward_raises_clear_error() -> None:
 
 
 def test_triton_surrogate_lif_spike_backward_matches_reference() -> None:
-    from spiker.kernels import surrogate_lif_forward
+    from myelin.kernels import surrogate_lif_forward
 
     torch.manual_seed(41)
     inputs = torch.rand((5, 2, 7), device="cuda", requires_grad=True)
@@ -924,7 +924,7 @@ def test_triton_surrogate_lif_backward_matches_reference_for_builtin_surrogates(
     surrogate_name: str,
     surrogate_fn,
 ) -> None:
-    from spiker.kernels import surrogate_lif_forward
+    from myelin.kernels import surrogate_lif_forward
 
     torch.manual_seed(42)
     inputs = torch.rand((4, 2, 5), device="cuda", requires_grad=True)
@@ -975,7 +975,7 @@ def test_triton_surrogate_lif_backward_matches_reference_for_builtin_surrogates(
 def test_generated_lif_surrogate_backward_matches_handwritten_triton(
     surrogate_name: str,
 ) -> None:
-    from spiker.triton import generated_lif_surrogate_backward, surrogate_lif_backward
+    from myelin.triton import generated_lif_surrogate_backward, surrogate_lif_backward
 
     torch.manual_seed(43)
     pre_reset = torch.rand((5, 3, 13), device="cuda") * 1.4 - 0.2
@@ -1015,7 +1015,7 @@ def test_triton_surrogate_lif_backward_packed_spikes_matches_dense_backward(
     neurons: int,
     surrogate_name: str,
 ) -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         pack_spikes_triton,
         surrogate_lif_backward,
         surrogate_lif_backward_packed_spikes,
@@ -1060,7 +1060,7 @@ def test_generated_lif_surrogate_backward_packed_spikes_matches_dense_generated(
     neurons: int,
     surrogate_name: str,
 ) -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         generated_lif_surrogate_backward,
         generated_lif_surrogate_backward_packed_spikes,
         pack_spikes_triton,
@@ -1103,7 +1103,7 @@ def test_generated_lif_surrogate_backward_packed_spikes_matches_dense_generated(
 def test_generated_triton_surrogate_lif_autograd_matches_handwritten_triton(
     surrogate_name: str,
 ) -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         generated_triton_surrogate_lif_function,
         triton_surrogate_lif_function,
     )
@@ -1153,7 +1153,7 @@ def test_generated_triton_surrogate_lif_autograd_matches_handwritten_triton(
 
 
 def test_generated_triton_surrogate_backend_matches_handwritten_triton_backend() -> None:
-    from spiker.kernels import surrogate_lif_forward
+    from myelin.kernels import surrogate_lif_forward
 
     torch.manual_seed(45)
     inputs = torch.rand((5, 2, 7), device="cuda", requires_grad=True)
@@ -1202,7 +1202,7 @@ def test_generated_triton_surrogate_backend_matches_handwritten_triton_backend()
 
 
 def test_linear_lif_triton_backend_matches_torch_backend_on_cuda() -> None:
-    from spiker.modules import LinearLIF
+    from myelin.modules import LinearLIF
 
     torch.manual_seed(123)
     inputs = torch.rand((6, 3, 11), device="cuda")
@@ -1223,7 +1223,7 @@ def test_linear_lif_triton_backend_matches_torch_backend_on_cuda() -> None:
 
 
 def test_linear_surrogate_lif_triton_backend_matches_torch_backend_on_cuda() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(124)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1266,7 +1266,7 @@ def test_linear_surrogate_lif_triton_backend_matches_torch_backend_on_cuda() -> 
 
 
 def test_linear_surrogate_lif_generated_triton_backend_matches_triton_backend_on_cuda() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(126)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1317,7 +1317,7 @@ def test_linear_surrogate_lif_generated_triton_backend_matches_triton_backend_on
 def test_generated_triton_linear_surrogate_lif_stream_backend_matches_triton_backend_on_cuda() -> (
     None
 ):
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(127)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1373,7 +1373,7 @@ def test_generated_triton_linear_surrogate_lif_stream_backend_matches_triton_bac
 
 
 def test_generated_triton_linear_surrogate_lif_stream_supports_input_gradients() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(128)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1393,8 +1393,8 @@ def test_generated_triton_linear_surrogate_lif_stream_supports_input_gradients()
 
 
 def test_triton_linear_surrogate_lif_forward_matches_streamed_reference() -> None:
-    from spiker.autograd import linear_surrogate_lif_stream_function
-    from spiker.triton import linear_surrogate_lif_forward
+    from myelin.autograd import linear_surrogate_lif_stream_function
+    from myelin.triton import linear_surrogate_lif_forward
 
     torch.manual_seed(125)
     inputs = torch.rand((7, 3, 11), device="cuda")
@@ -1426,7 +1426,7 @@ def test_triton_linear_surrogate_lif_forward_matches_streamed_reference() -> Non
 
 
 def test_public_linear_surrogate_lif_forward_triton_matches_torch_dispatcher() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward
+    from myelin.kernels import linear_surrogate_lif_forward
 
     torch.manual_seed(135)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1478,7 +1478,7 @@ def test_public_linear_surrogate_lif_forward_triton_matches_torch_dispatcher() -
 
 
 def test_triton_linear_surrogate_lif_forward_matches_materialized_reference_without_bias() -> None:
-    from spiker.triton import linear_surrogate_lif_forward
+    from myelin.triton import linear_surrogate_lif_forward
 
     torch.manual_seed(126)
     inputs = torch.rand((5, 5, 13), device="cuda")
@@ -1509,7 +1509,7 @@ def test_triton_linear_surrogate_lif_forward_matches_materialized_reference_with
 
 
 def test_triton_linear_surrogate_lif_backward_matches_streamed_reference_without_bias() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_stream_function,
         triton_linear_surrogate_lif_function,
     )
@@ -1556,7 +1556,7 @@ def test_triton_linear_surrogate_lif_backward_matches_streamed_reference_without
 
 
 def test_triton_linear_surrogate_lif_backward_matches_reference_without_input_grad() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_stream_function,
         triton_linear_surrogate_lif_function,
     )
@@ -1607,7 +1607,7 @@ def test_triton_linear_surrogate_lif_backward_matches_reference_without_input_gr
 def test_generated_linear_lif_surrogate_backward_packed_spikes_matches_dense_generated(
     neurons: int,
 ) -> None:
-    from spiker.triton import (
+    from myelin.triton import (
         generated_linear_lif_surrogate_backward_weight_bias,
         generated_linear_lif_surrogate_backward_weight_bias_packed_spikes,
         linear_surrogate_lif_forward,
@@ -1677,7 +1677,7 @@ def test_generated_linear_lif_surrogate_backward_packed_spikes_matches_dense_gen
 
 
 def test_triton_linear_surrogate_lif_checkpoint_matches_reference_without_input_grad() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_function,
     )
@@ -1735,7 +1735,7 @@ def test_triton_linear_surrogate_lif_checkpoint_matches_reference_across_chunk_e
     checkpoint_size: int,
     has_bias: bool,
 ) -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_function,
     )
@@ -1806,7 +1806,7 @@ def test_generated_triton_linear_surrogate_lif_checkpoint_matches_triton_backend
     checkpoint_size: int,
     has_bias: bool,
 ) -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         generated_triton_linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_function,
     )
@@ -1879,7 +1879,7 @@ def test_generated_triton_linear_surrogate_lif_checkpoint_matches_triton_backend
 
 
 def test_linear_surrogate_lif_stream_synapse_triton_backend_matches_torch_backend() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(127)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -1939,7 +1939,7 @@ def test_linear_surrogate_lif_stream_synapse_triton_backend_matches_torch_backen
 
 
 def test_linear_surrogate_lif_checkpoint_triton_backend_matches_torch_backend() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(131)
     inputs = torch.rand((7, 3, 11), device="cuda")
@@ -1997,7 +1997,7 @@ def test_linear_surrogate_lif_checkpoint_triton_backend_matches_torch_backend() 
 
 
 def test_linear_surrogate_lif_checkpoint_generated_triton_backend_matches_triton_backend() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(141)
     inputs = torch.rand((7, 3, 11), device="cuda")
@@ -2054,7 +2054,7 @@ def test_linear_surrogate_lif_checkpoint_generated_triton_backend_matches_triton
 
 
 def test_linear_surrogate_lif_checkpoint_triton_backend_preserves_input_gradients() -> None:
-    from spiker.modules import LinearSurrogateLIF
+    from myelin.modules import LinearSurrogateLIF
 
     torch.manual_seed(133)
     inputs = torch.rand((6, 3, 11), device="cuda", requires_grad=True)
@@ -2116,7 +2116,7 @@ def test_linear_surrogate_lif_checkpoint_triton_backend_preserves_input_gradient
 
 
 def test_direct_triton_checkpoint_function_matches_reference_with_input_gradients() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_function,
     )
@@ -2171,7 +2171,7 @@ def test_direct_triton_checkpoint_function_matches_reference_with_input_gradient
 
 
 def test_direct_triton_checkpoint_function_matches_reference_with_unaligned_neurons() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_function,
     )
@@ -2231,7 +2231,7 @@ def test_direct_triton_checkpoint_function_matches_reference_with_unaligned_neur
 
 
 def test_triton_checkpoint_rate_function_matches_dense_checkpoint_reference() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         linear_surrogate_lif_checkpoint_function,
         triton_linear_surrogate_lif_checkpoint_rate_function,
     )
@@ -2292,7 +2292,7 @@ def test_triton_checkpoint_rate_function_matches_dense_checkpoint_reference() ->
 
 
 def test_generated_triton_checkpoint_rate_function_matches_triton_rate_function() -> None:
-    from spiker.autograd import (
+    from myelin.autograd import (
         generated_triton_linear_surrogate_lif_checkpoint_rate_function,
         triton_linear_surrogate_lif_checkpoint_rate_function,
     )
@@ -2355,8 +2355,8 @@ def test_generated_triton_checkpoint_rate_function_matches_triton_rate_function(
 
 
 def test_triton_checkpoint_replay_weight_bias_matches_rate_backward() -> None:
-    from spiker.autograd import triton_linear_surrogate_lif_checkpoint_rate_function
-    from spiker.triton import (
+    from myelin.autograd import triton_linear_surrogate_lif_checkpoint_rate_function
+    from myelin.triton import (
         linear_surrogate_lif_checkpoint_backward_replay_weight_bias,
         linear_surrogate_lif_checkpoint_rate_forward,
     )
@@ -2428,7 +2428,7 @@ def test_triton_checkpoint_replay_weight_bias_matches_rate_backward() -> None:
 
 
 def test_public_linear_surrogate_lif_rate_forward_matches_dense_checkpoint_reference() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_rate_forward
 
     torch.manual_seed(138)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -2481,8 +2481,8 @@ def test_public_linear_surrogate_lif_rate_forward_matches_dense_checkpoint_refer
 
 
 def test_public_linear_surrogate_lif_packed_forward_auto_matches_dense_checkpoint() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_packed_forward
-    from spiker.triton import unpack_spikes_triton
+    from myelin.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_packed_forward
+    from myelin.triton import unpack_spikes_triton
 
     torch.manual_seed(139)
     inputs = torch.rand((6, 3, 13), device="cuda")
@@ -2523,7 +2523,7 @@ def test_public_linear_surrogate_lif_packed_forward_auto_matches_dense_checkpoin
 
 
 def test_two_layer_packed_hidden_rate_matches_composed_dense_gradients() -> None:
-    from spiker.kernels import (
+    from myelin.kernels import (
         linear_surrogate_lif_forward,
         linear_surrogate_lif_rate_forward,
         two_layer_surrogate_lif_rate_packed_hidden_forward,
@@ -2609,7 +2609,7 @@ def test_two_layer_packed_hidden_rate_matches_composed_dense_gradients() -> None
 
 
 def test_public_linear_surrogate_lif_rate_forward_none_matches_dense_rates() -> None:
-    from spiker.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_forward, linear_surrogate_lif_rate_forward
 
     torch.manual_seed(139)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -2668,7 +2668,7 @@ def test_public_linear_surrogate_lif_rate_forward_none_matches_dense_rates() -> 
 
 
 def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_weight_grad() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_rate_forward
 
     torch.manual_seed(140)
     inputs = torch.rand((6, 3, 16), device="cuda")
@@ -2721,7 +2721,7 @@ def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_weight_g
 
 
 def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_bias_grad() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_rate_forward
 
     torch.manual_seed(145)
     inputs = torch.rand((6, 3, 16), device="cuda")
@@ -2779,7 +2779,7 @@ def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_bias_gra
 
 
 def test_public_linear_surrogate_lif_rate_triton_compile_rejects_unsupported_cases() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_rate_forward
 
     inputs = torch.rand((6, 3, 16), device="cuda")
     weight = torch.rand((16, 32), device="cuda")
@@ -2807,7 +2807,7 @@ def test_public_linear_surrogate_lif_rate_triton_compile_rejects_unsupported_cas
 
 
 def test_public_linear_surrogate_lif_rate_generated_backend_matches_triton_backend() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
+    from myelin.kernels import linear_surrogate_lif_rate_forward
 
     torch.manual_seed(144)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -2866,8 +2866,8 @@ def test_public_linear_surrogate_lif_rate_generated_backend_matches_triton_backe
 
 
 def test_linear_surrogate_lif_rate_module_triton_matches_functional_rate_path() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
-    from spiker.modules import LinearSurrogateLIFRate
+    from myelin.kernels import linear_surrogate_lif_rate_forward
+    from myelin.modules import LinearSurrogateLIFRate
 
     torch.manual_seed(141)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -2922,9 +2922,9 @@ def test_linear_surrogate_lif_rate_module_triton_matches_functional_rate_path() 
 
 
 def test_linear_surrogate_lif_packed_module_triton_matches_functional_packed_path() -> None:
-    from spiker.kernels import linear_surrogate_lif_packed_forward
-    from spiker.modules import LinearSurrogateLIFPacked
-    from spiker.triton import unpack_spikes_triton
+    from myelin.kernels import linear_surrogate_lif_packed_forward
+    from myelin.modules import LinearSurrogateLIFPacked
+    from myelin.triton import unpack_spikes_triton
 
     torch.manual_seed(146)
     inputs = torch.rand((6, 3, 13), device="cuda")
@@ -2963,8 +2963,8 @@ def test_linear_surrogate_lif_packed_module_triton_matches_functional_packed_pat
 
 
 def test_linear_surrogate_lif_rate_module_generated_backend_matches_triton_rate_path() -> None:
-    from spiker.kernels import linear_surrogate_lif_rate_forward
-    from spiker.modules import LinearSurrogateLIFRate
+    from myelin.kernels import linear_surrogate_lif_rate_forward
+    from myelin.modules import LinearSurrogateLIFRate
 
     torch.manual_seed(145)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -3019,7 +3019,7 @@ def test_linear_surrogate_lif_rate_module_generated_backend_matches_triton_rate_
 
 
 def test_linear_surrogate_lif_rate_module_auto_backend_runs_triton_on_cuda() -> None:
-    from spiker.modules import LinearSurrogateLIFRate
+    from myelin.modules import LinearSurrogateLIFRate
 
     torch.manual_seed(142)
     inputs = torch.rand((6, 3, 13), device="cuda", requires_grad=True)
@@ -3043,7 +3043,7 @@ def test_linear_surrogate_lif_rate_module_auto_backend_runs_triton_on_cuda() -> 
 
 
 def test_backend_lif_forward_torch_fallback_matches_reference_on_cpu() -> None:
-    from spiker.kernels import lif_forward
+    from myelin.kernels import lif_forward
 
     inputs = torch.rand((3, 2, 4))
     initial = LIFState(membrane=torch.zeros((2, 4)))

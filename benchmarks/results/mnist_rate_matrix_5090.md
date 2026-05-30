@@ -13,7 +13,7 @@ Compares rate-readout variants across matched MNIST training settings.
 - `rate_checkpoint_size`: `balanced`
 - `train_limit`: `4096`
 - `test_limit`: `2048`
-- `compile_spiker_only`: `True`
+- `compile_myelin_only`: `True`
 - `matmul_precision`: `highest`
 
 ## Results

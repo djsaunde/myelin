@@ -5,7 +5,7 @@ Runs the repo MNIST examples with matched training knobs.
 This is a short directional run, not a final accuracy benchmark:
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --device cuda \
   --timesteps 10 \
   --encoding poisson \

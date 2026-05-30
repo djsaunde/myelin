@@ -8,7 +8,7 @@ import pytest
 import torch
 import torch.distributed as torch_dist
 
-from spiker.distributed import (
+from myelin.distributed import (
     distributed_available_and_initialized,
     fsdp_available,
     packed_spike_all_gather,
@@ -16,7 +16,7 @@ from spiker.distributed import (
     packed_spike_rate_all_reduce,
     wrap_fsdp_if_initialized,
 )
-from spiker.packing import PackedSpikes, pack_spikes
+from myelin.packing import PackedSpikes, pack_spikes
 
 pytestmark = pytest.mark.extended
 
@@ -133,7 +133,7 @@ class FakeFSDP(torch.nn.Module):
 def test_distributed_available_and_initialized_uses_torch_distributed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(initialized=True))
     assert distributed_available_and_initialized()
@@ -143,7 +143,7 @@ def test_distributed_available_and_initialized_uses_torch_distributed(
 
 
 def test_fsdp_available_uses_import_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "_fsdp_cls", lambda: FakeFSDP)
     assert fsdp_available()
@@ -158,7 +158,7 @@ def test_fsdp_available_uses_import_helper(monkeypatch: pytest.MonkeyPatch) -> N
 def test_wrap_fsdp_if_initialized_returns_module_when_not_initialized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(initialized=False))
     module = torch.nn.Linear(2, 3)
@@ -171,7 +171,7 @@ def test_wrap_fsdp_if_initialized_returns_module_when_not_initialized(
 def test_wrap_fsdp_if_initialized_wraps_with_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(initialized=True))
     monkeypatch.setattr(distributed, "_fsdp_cls", lambda: FakeFSDP)
@@ -190,7 +190,7 @@ def test_wrap_fsdp_if_initialized_wraps_with_defaults(
 def test_packed_spike_all_gather_preserves_packed_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(world_size=2))
     spikes = torch.zeros((2, 3, 35), dtype=torch.float32)
@@ -209,7 +209,7 @@ def test_packed_spike_all_gather_preserves_packed_metadata(
 def test_packed_spike_count_all_reduce_sums_counts_across_ranks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     fake_dist = FakeDist(world_size=3)
     monkeypatch.setattr(distributed, "dist", fake_dist)
@@ -227,7 +227,7 @@ def test_packed_spike_count_all_reduce_sums_counts_across_ranks(
 def test_packed_spike_rate_all_reduce_averages_equal_shape_ranks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(world_size=4))
     spikes = torch.zeros((2, 3, 35), dtype=torch.float32)
@@ -242,7 +242,7 @@ def test_packed_spike_rate_all_reduce_averages_equal_shape_ranks(
 def test_packed_collectives_require_initialized_distributed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import spiker.distributed as distributed
+    import myelin.distributed as distributed
 
     monkeypatch.setattr(distributed, "dist", FakeDist(initialized=False))
     packed = PackedSpikes(data=torch.zeros((1, 1), dtype=torch.int32), original_shape=(1, 32))
@@ -252,14 +252,14 @@ def test_packed_collectives_require_initialized_distributed(
 
 
 def test_public_distributed_helpers_are_exported() -> None:
-    import spiker
+    import myelin
 
-    assert spiker.distributed_available_and_initialized
-    assert spiker.fsdp_available
-    assert spiker.wrap_fsdp_if_initialized
-    assert spiker.packed_spike_all_gather
-    assert spiker.packed_spike_count_all_reduce
-    assert spiker.packed_spike_rate_all_reduce
+    assert myelin.distributed_available_and_initialized
+    assert myelin.fsdp_available
+    assert myelin.wrap_fsdp_if_initialized
+    assert myelin.packed_spike_all_gather
+    assert myelin.packed_spike_count_all_reduce
+    assert myelin.packed_spike_rate_all_reduce
 
 
 def test_packed_collectives_work_with_gloo_process_group(tmp_path: Path) -> None:

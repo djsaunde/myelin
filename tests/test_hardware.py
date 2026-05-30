@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import torch
 
-import spiker
-from spiker.hardware import (
+import myelin
+from myelin.hardware import (
     HARDWARE_BUNDLE_FORMAT,
     HARDWARE_EXPORT_FORMAT,
     PLACEMENT_EXPORT_FORMAT,
@@ -36,8 +36,8 @@ from spiker.hardware import (
     write_quantized_hardware_export,
     write_spinnaker2_dense_lif_manifest,
 )
-from spiker.modules import LinearLIF
-from spiker.neurons import LIFParams
+from myelin.modules import LinearLIF
+from myelin.neurons import LIFParams
 
 pytestmark = pytest.mark.extended
 
@@ -499,39 +499,39 @@ def test_export_linear_lif_module_rejects_non_lif_module() -> None:
 
 
 def test_hardware_exports_are_public() -> None:
-    assert spiker.HARDWARE_BUNDLE_FORMAT == HARDWARE_BUNDLE_FORMAT
-    assert spiker.HARDWARE_EXPORT_FORMAT == HARDWARE_EXPORT_FORMAT
-    assert spiker.PLACEMENT_EXPORT_FORMAT == PLACEMENT_EXPORT_FORMAT
-    assert spiker.QUANTIZED_HARDWARE_EXPORT_FORMAT == QUANTIZED_HARDWARE_EXPORT_FORMAT
-    assert spiker.SPINNAKER2_DENSE_LIF_EXPORT_FORMAT == SPINNAKER2_DENSE_LIF_EXPORT_FORMAT
-    assert spiker.DenseLIFHardwareExport is not None
-    assert spiker.DenseLIFPlacementCore is not None
-    assert spiker.DenseLIFPlacementPlan is not None
-    assert spiker.HardwareExportBundle is not None
-    assert spiker.QuantizedDenseLIFHardwareExport is not None
-    assert spiker.SpiNNaker2DenseLIFManifest is not None
-    assert spiker.export_dense_lif_layer is export_dense_lif_layer
-    assert spiker.export_linear_lif_module is export_linear_lif_module
-    assert spiker.dense_lif_hardware_export_from_dict is dense_lif_hardware_export_from_dict
-    assert spiker.dense_lif_placement_plan_from_dict is dense_lif_placement_plan_from_dict
-    assert spiker.hardware_export_bundle_from_dict is hardware_export_bundle_from_dict
+    assert myelin.HARDWARE_BUNDLE_FORMAT == HARDWARE_BUNDLE_FORMAT
+    assert myelin.HARDWARE_EXPORT_FORMAT == HARDWARE_EXPORT_FORMAT
+    assert myelin.PLACEMENT_EXPORT_FORMAT == PLACEMENT_EXPORT_FORMAT
+    assert myelin.QUANTIZED_HARDWARE_EXPORT_FORMAT == QUANTIZED_HARDWARE_EXPORT_FORMAT
+    assert myelin.SPINNAKER2_DENSE_LIF_EXPORT_FORMAT == SPINNAKER2_DENSE_LIF_EXPORT_FORMAT
+    assert myelin.DenseLIFHardwareExport is not None
+    assert myelin.DenseLIFPlacementCore is not None
+    assert myelin.DenseLIFPlacementPlan is not None
+    assert myelin.HardwareExportBundle is not None
+    assert myelin.QuantizedDenseLIFHardwareExport is not None
+    assert myelin.SpiNNaker2DenseLIFManifest is not None
+    assert myelin.export_dense_lif_layer is export_dense_lif_layer
+    assert myelin.export_linear_lif_module is export_linear_lif_module
+    assert myelin.dense_lif_hardware_export_from_dict is dense_lif_hardware_export_from_dict
+    assert myelin.dense_lif_placement_plan_from_dict is dense_lif_placement_plan_from_dict
+    assert myelin.hardware_export_bundle_from_dict is hardware_export_bundle_from_dict
     assert (
-        spiker.quantized_dense_lif_hardware_export_from_dict
+        myelin.quantized_dense_lif_hardware_export_from_dict
         is quantized_dense_lif_hardware_export_from_dict
     )
-    assert spiker.export_linear_lif_hardware_bundle is export_linear_lif_hardware_bundle
-    assert spiker.export_spinnaker2_dense_lif_manifest is export_spinnaker2_dense_lif_manifest
-    assert spiker.spinnaker2_dense_lif_manifest_from_dict is spinnaker2_dense_lif_manifest_from_dict
-    assert spiker.plan_dense_lif_placement is plan_dense_lif_placement
-    assert spiker.quantize_dense_lif_export is quantize_dense_lif_export
-    assert spiker.dequantize_dense_lif_export is dequantize_dense_lif_export
-    assert spiker.read_dense_lif_placement_plan is read_dense_lif_placement_plan
-    assert spiker.read_hardware_export is read_hardware_export
-    assert spiker.read_hardware_export_bundle is read_hardware_export_bundle
-    assert spiker.read_quantized_hardware_export is read_quantized_hardware_export
-    assert spiker.read_spinnaker2_dense_lif_manifest is read_spinnaker2_dense_lif_manifest
-    assert spiker.write_dense_lif_placement_plan is write_dense_lif_placement_plan
-    assert spiker.write_hardware_export is write_hardware_export
-    assert spiker.write_hardware_export_bundle is write_hardware_export_bundle
-    assert spiker.write_quantized_hardware_export is write_quantized_hardware_export
-    assert spiker.write_spinnaker2_dense_lif_manifest is write_spinnaker2_dense_lif_manifest
+    assert myelin.export_linear_lif_hardware_bundle is export_linear_lif_hardware_bundle
+    assert myelin.export_spinnaker2_dense_lif_manifest is export_spinnaker2_dense_lif_manifest
+    assert myelin.spinnaker2_dense_lif_manifest_from_dict is spinnaker2_dense_lif_manifest_from_dict
+    assert myelin.plan_dense_lif_placement is plan_dense_lif_placement
+    assert myelin.quantize_dense_lif_export is quantize_dense_lif_export
+    assert myelin.dequantize_dense_lif_export is dequantize_dense_lif_export
+    assert myelin.read_dense_lif_placement_plan is read_dense_lif_placement_plan
+    assert myelin.read_hardware_export is read_hardware_export
+    assert myelin.read_hardware_export_bundle is read_hardware_export_bundle
+    assert myelin.read_quantized_hardware_export is read_quantized_hardware_export
+    assert myelin.read_spinnaker2_dense_lif_manifest is read_spinnaker2_dense_lif_manifest
+    assert myelin.write_dense_lif_placement_plan is write_dense_lif_placement_plan
+    assert myelin.write_hardware_export is write_hardware_export
+    assert myelin.write_hardware_export_bundle is write_hardware_export_bundle
+    assert myelin.write_quantized_hardware_export is write_quantized_hardware_export
+    assert myelin.write_spinnaker2_dense_lif_manifest is write_spinnaker2_dense_lif_manifest

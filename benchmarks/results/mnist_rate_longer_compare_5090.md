@@ -6,12 +6,12 @@ matched training knobs beyond the smallest smoke size.
 ## Command
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --variant dense --variant rate \
   --device cuda --timesteps 10 --batch 128 --hidden 128 \
   --epochs 2 --train-limit 4096 --test-limit 2048 \
   --eval-batches 4 --log-every 200 --eval-every 200 \
-  --matmul-precision highest --grad-clip 0.1 --compile-spiker-only
+  --matmul-precision highest --grad-clip 0.1 --compile-myelin-only
 ```
 
 ## Environment
@@ -26,7 +26,7 @@ uv run python -m spiker.benchmarks.mnist_compare \
 - `epochs`: `2`
 - `train_limit`: `4096`
 - `test_limit`: `2048`
-- `compile_spiker_only`: `True`
+- `compile_myelin_only`: `True`
 - `matmul_precision`: `highest`
 - `grad_clip`: `0.1`
 

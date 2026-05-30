@@ -33,7 +33,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
-from spiker import LinearSurrogateLIF, fast_sigmoid_surrogate
+from myelin import LinearSurrogateLIF, fast_sigmoid_surrogate
 
 
 class MNISTSNN(nn.Module):

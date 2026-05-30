@@ -19,12 +19,12 @@ uv run python examples/train_mnist_conv.py \
   --log-every 1000 \
   --eval-every 1000 \
   --log-dynamics \
-  --synapse-init spiker
+  --synapse-init myelin
 ```
 
 | Setting | Final Test Loss | Final Test Acc | Hidden Spike Rate | Output Spike Rate | Logit Std |
 |---|---:|---:|---:|---:|---:|
-| `synapse_init=spiker`, `grad_clip=0.1` | 2.211106 | 0.3711 | 0.310461 | 0.051875 | 0.087693 |
+| `synapse_init=myelin`, `grad_clip=0.1` | 2.211106 | 0.3711 | 0.310461 | 0.051875 | 0.087693 |
 
 The initial output layer was silent at step 1, and the final output spike rate
 was still low. This pointed to readout/current scaling rather than the
@@ -43,7 +43,7 @@ convolutional feature extractor itself.
 ## Tuned Conv vs snnTorch Conv
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --device cuda \
   --variant conv \
   --variant snntorch_conv \
@@ -73,9 +73,9 @@ compiled conv module no longer traces random encoding work or an encoding
 string through the model forward.
 
 ```bash
-uv run python -m spiker.benchmarks.mnist_compare \
+uv run python -m myelin.benchmarks.mnist_compare \
   --device cuda \
-  --compile-spiker-only \
+  --compile-myelin-only \
   --variant conv \
   --variant snntorch_conv \
   --timesteps 10 \
@@ -113,7 +113,7 @@ accuracy check.
 ## Takeaway
 
 The conv example was brittle primarily because the SNN synapse layers used the
-small default spiker initialization. Fan-in initialization gives the readout
+small default myelin initialization. Fan-in initialization gives the readout
 enough current to spike early. Less aggressive clipping (`1.0`) helps this
 conv recipe, while higher surrogate slope hurts. The compiled conv path now
 matches the tuned eager accuracy after moving stochastic Poisson encoding

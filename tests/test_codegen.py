@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker._optional import has_triton
-from spiker.codegen import (
+from myelin._optional import has_triton
+from myelin.codegen import (
     compile_surrogate_derivative_ir,
     lower_neuron_to_ssa,
     render_lif_surrogate_backward_step_body,
@@ -13,7 +13,7 @@ from spiker.codegen import (
     render_surrogate_derivative_ir_body,
     render_triton_step_body,
 )
-from spiker.dsl import (
+from myelin.dsl import (
     NeuronIR,
     SurrogateBuilder,
     alif_ir,
@@ -21,8 +21,8 @@ from spiker.dsl import (
     lif_ir,
     surrogate_derivative_expr,
 )
-from spiker.neurons import LIFParams, LIFState, lif_step
-from spiker.surrogates import surrogate_derivative
+from myelin.neurons import LIFParams, LIFState, lif_step
+from myelin.surrogates import surrogate_derivative
 
 
 def test_lif_ir_lowers_to_shared_ssa_temporaries() -> None:
@@ -90,7 +90,7 @@ def test_lif_ir_renders_triton_step_body_with_kernel_names() -> None:
 def test_generated_lif_forward_kernel_source_contains_template() -> None:
     if not has_triton():
         pytest.skip("generated Triton source helper requires Triton imports")
-    from spiker.triton.generated import render_lif_forward_kernel_source
+    from myelin.triton.generated import render_lif_forward_kernel_source
 
     source = render_lif_forward_kernel_source()
 

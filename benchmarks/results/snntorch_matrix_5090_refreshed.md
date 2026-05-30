@@ -1,6 +1,6 @@
-# spiker vs snnTorch Matrix
+# myelin vs snnTorch Matrix
 
-Compares compiled spiker examples against eager snnTorch examples across timesteps.
+Compares compiled myelin examples against eager snnTorch examples across timesteps.
 
 ## Environment
 
@@ -12,7 +12,7 @@ Compares compiled spiker examples against eager snnTorch examples across timeste
 - `epochs`: `1`
 - `train_limit`: `1024`
 - `test_limit`: `1024`
-- `compile_spiker_only`: `True`
+- `compile_myelin_only`: `True`
 - `matmul_precision`: `highest`
 
 ## Results

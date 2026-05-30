@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker._optional import has_triton
-from spiker.packing import (
+from myelin._optional import has_triton
+from myelin.packing import (
     PackedSpikes,
     pack_spikes,
     packed_spike_count,
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.parametrize("last_dim", [1, 31, 32, 33, 65])
 def test_triton_pack_spikes_matches_torch_pack(last_dim: int) -> None:
-    from spiker.triton import pack_spikes_triton
+    from myelin.triton import pack_spikes_triton
 
     torch.manual_seed(last_dim)
     spikes = (torch.rand((5, 3, last_dim), device="cuda") > 0.7).to(torch.float32)
@@ -36,7 +36,7 @@ def test_triton_pack_spikes_matches_torch_pack(last_dim: int) -> None:
 
 @pytest.mark.parametrize("last_dim", [1, 31, 32, 33, 65])
 def test_triton_unpack_spikes_matches_torch_unpack(last_dim: int) -> None:
-    from spiker.triton import pack_spikes_triton, unpack_spikes_triton
+    from myelin.triton import pack_spikes_triton, unpack_spikes_triton
 
     torch.manual_seed(100 + last_dim)
     spikes = (torch.rand((5, 3, last_dim), device="cuda") > 0.7).to(torch.float32)
@@ -50,7 +50,7 @@ def test_triton_unpack_spikes_matches_torch_unpack(last_dim: int) -> None:
 
 
 def test_triton_pack_spikes_handles_high_bit() -> None:
-    from spiker.triton import pack_spikes_triton, unpack_spikes_triton
+    from myelin.triton import pack_spikes_triton, unpack_spikes_triton
 
     spikes = torch.zeros((1, 32), device="cuda")
     spikes[0, 31] = 1.0
@@ -64,7 +64,7 @@ def test_triton_pack_spikes_handles_high_bit() -> None:
 
 @pytest.mark.parametrize("last_dim", [1, 31, 32, 33, 2048])
 def test_triton_packed_spike_counts_match_torch_counts(last_dim: int) -> None:
-    from spiker.triton import pack_spikes_triton, packed_spike_counts_triton
+    from myelin.triton import pack_spikes_triton, packed_spike_counts_triton
 
     torch.manual_seed(200 + last_dim)
     spikes = (torch.rand((5, 3, last_dim), device="cuda") > 0.7).to(torch.float32)
@@ -82,7 +82,7 @@ def test_triton_packed_spike_counts_match_torch_counts(last_dim: int) -> None:
 
 
 def test_public_packed_spike_counts_and_rates_match_dense_on_cuda() -> None:
-    from spiker.triton import pack_spikes_triton
+    from myelin.triton import pack_spikes_triton
 
     torch.manual_seed(266)
     spikes = (torch.rand((5, 3, 65), device="cuda") > 0.7).to(torch.float32)
@@ -103,7 +103,7 @@ def test_public_packed_spike_counts_and_rates_match_dense_on_cuda() -> None:
 
 
 def test_triton_packed_spike_counts_rejects_dims_that_keep_packed_axis() -> None:
-    from spiker.triton import pack_spikes_triton, packed_spike_counts_triton
+    from myelin.triton import pack_spikes_triton, packed_spike_counts_triton
 
     spikes = torch.zeros((2, 3, 35), device="cuda")
     packed = pack_spikes_triton(spikes)
@@ -113,7 +113,7 @@ def test_triton_packed_spike_counts_rejects_dims_that_keep_packed_axis() -> None
 
 
 def test_triton_unpack_rejects_shape_mismatch() -> None:
-    from spiker.triton import unpack_spikes_triton
+    from myelin.triton import unpack_spikes_triton
 
     packed = PackedSpikes(
         data=torch.zeros((2, 2), dtype=torch.int32, device="cuda"),

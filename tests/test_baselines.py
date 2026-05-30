@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from spiker.baselines import compiled_available, compiled_lif_unroll, eager_lif_unroll
-from spiker.neurons import LIFParams, LIFState
+from myelin.baselines import compiled_available, compiled_lif_unroll, eager_lif_unroll
+from myelin.neurons import LIFParams, LIFState
 
 pytestmark = pytest.mark.extended
 
