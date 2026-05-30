@@ -13,7 +13,9 @@ import modal
 
 APP_NAME = "myelin-spikegpt"
 REMOTE_ROOT = "/root/myelin"
-DATA_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+DATA_URL = (
+    "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+)
 
 GPU = "H100"
 

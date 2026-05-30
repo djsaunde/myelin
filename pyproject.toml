@@ -19,6 +19,7 @@ bench = [
     "numpy",
 ]
 dev = [
+    "pre-commit",
     "pyright",
     "pytest",
     "ruff",

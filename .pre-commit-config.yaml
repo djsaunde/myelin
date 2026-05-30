@@ -1,0 +1,23 @@
+# Pre-commit hooks for myelin.
+#
+# Install once per clone:  uv run pre-commit install
+# Run on all files:        uv run pre-commit run --all-files
+#
+# Hooks call the project's pinned ruff through `uv run`, so they use the exact
+# same ruff version as the CI gate (ruff format --check / ruff check) and never
+# drift from it.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
