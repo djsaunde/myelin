@@ -16,9 +16,7 @@ HARDWARE_EXPORT_FORMAT = "spiker.dense_lif.v0"
 QUANTIZED_HARDWARE_EXPORT_FORMAT = "spiker.dense_lif_quantized.v0"
 PLACEMENT_EXPORT_FORMAT = "spiker.dense_lif_placement.v0"
 HARDWARE_BUNDLE_FORMAT = "spiker.hardware_bundle.v0"
-LOIHI2_DENSE_LIF_EXPORT_FORMAT = "spiker.loihi2_dense_lif_manifest.v0"
 SPINNAKER2_DENSE_LIF_EXPORT_FORMAT = "spiker.spinnaker2_dense_lif_manifest.v0"
-LAVA_DENSE_LIF_EXPORT_FORMAT = "spiker.lava_dense_lif_spec.v0"
 
 
 @dataclass(frozen=True)
@@ -124,35 +122,6 @@ class HardwareExportBundle:
 
 
 @dataclass(frozen=True)
-class Loihi2DenseLIFManifest:
-    """Loihi 2-oriented manifest for a quantized dense LIF placement bundle."""
-
-    format: str
-    source_format: str
-    target: str
-    quantized_export_path: str
-    placement_plan_path: str
-    input_size: int
-    output_size: int
-    core_count: int
-    total_synapse_count: int
-    compartments_per_core: int
-    axons_per_core: int
-    weight_bits: int
-    timestep_us: float
-    neuron: dict[str, float]
-    mapping: list[dict[str, int | bool]]
-    notes: list[str]
-    metadata: dict[str, str]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
-
-
-@dataclass(frozen=True)
 class SpiNNaker2DenseLIFManifest:
     """SpiNNaker 2-oriented manifest for a quantized dense LIF placement bundle."""
 
@@ -171,33 +140,6 @@ class SpiNNaker2DenseLIFManifest:
     timestep_ms: float
     neuron: dict[str, float]
     mapping: list[dict[str, int | bool]]
-    notes: list[str]
-    metadata: dict[str, str]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
-
-
-@dataclass(frozen=True)
-class LavaDenseLIFSpec:
-    """Lava-oriented process spec for a quantized dense LIF layer."""
-
-    format: str
-    source_format: str
-    target: str
-    quantized_export_path: str
-    input_size: int
-    output_size: int
-    weight_bits: int
-    timestep_us: float
-    process: dict[str, str]
-    ports: dict[str, str]
-    lava_lif_params: dict[str, float | int | list[int]]
-    neuron: dict[str, float]
-    quantization: dict[str, int | float | str]
     notes: list[str]
     metadata: dict[str, str]
 
@@ -357,60 +299,6 @@ def hardware_export_bundle_from_dict(data: Mapping[str, Any]) -> HardwareExportB
     )
 
 
-def loihi2_dense_lif_manifest_from_dict(data: Mapping[str, Any]) -> Loihi2DenseLIFManifest:
-    """Parse and validate a Loihi 2 dense LIF manifest dictionary."""
-
-    if data.get("format") != LOIHI2_DENSE_LIF_EXPORT_FORMAT:
-        raise ValueError(f"unsupported Loihi 2 manifest format: {data.get('format')!r}")
-    if data.get("source_format") != QUANTIZED_HARDWARE_EXPORT_FORMAT:
-        raise ValueError(f"unsupported source_format: {data.get('source_format')!r}")
-    target = data.get("target")
-    if target != "loihi2":
-        raise ValueError("target must be 'loihi2'")
-    input_size = _expect_int(data, "input_size")
-    output_size = _expect_int(data, "output_size")
-    core_count = _expect_int(data, "core_count")
-    total_synapse_count = _expect_int(data, "total_synapse_count")
-    compartments_per_core = _expect_int(data, "compartments_per_core")
-    axons_per_core = _expect_int(data, "axons_per_core")
-    weight_bits = _expect_int(data, "weight_bits")
-    timestep_us = _expect_positive_number(data, "timestep_us")
-    neuron = _expect_float_map(
-        data.get("neuron"),
-        required_keys=("tau_mem", "decay", "threshold", "reset"),
-        field="neuron",
-    )
-    mapping = _expect_dense_lif_adapter_mapping(
-        data.get("mapping"),
-        input_size=input_size,
-        output_size=output_size,
-        core_count=core_count,
-    )
-    if sum(int(item["synapse_count"]) for item in mapping) != total_synapse_count:
-        raise ValueError("total_synapse_count must match mapping synapse counts")
-    notes = _expect_string_list(data.get("notes"))
-    metadata = _expect_metadata(data.get("metadata", {}))
-    return Loihi2DenseLIFManifest(
-        format=LOIHI2_DENSE_LIF_EXPORT_FORMAT,
-        source_format=QUANTIZED_HARDWARE_EXPORT_FORMAT,
-        target="loihi2",
-        quantized_export_path=_expect_nonempty_string(data, "quantized_export_path"),
-        placement_plan_path=_expect_nonempty_string(data, "placement_plan_path"),
-        input_size=input_size,
-        output_size=output_size,
-        core_count=core_count,
-        total_synapse_count=total_synapse_count,
-        compartments_per_core=compartments_per_core,
-        axons_per_core=axons_per_core,
-        weight_bits=weight_bits,
-        timestep_us=timestep_us,
-        neuron=neuron,
-        mapping=mapping,
-        notes=notes,
-        metadata=metadata,
-    )
-
-
 def spinnaker2_dense_lif_manifest_from_dict(
     data: Mapping[str, Any],
 ) -> SpiNNaker2DenseLIFManifest:
@@ -467,58 +355,6 @@ def spinnaker2_dense_lif_manifest_from_dict(
     )
 
 
-def lava_dense_lif_spec_from_dict(data: Mapping[str, Any]) -> LavaDenseLIFSpec:
-    """Parse and validate a Lava dense LIF process spec dictionary."""
-
-    if data.get("format") != LAVA_DENSE_LIF_EXPORT_FORMAT:
-        raise ValueError(f"unsupported Lava spec format: {data.get('format')!r}")
-    if data.get("source_format") != QUANTIZED_HARDWARE_EXPORT_FORMAT:
-        raise ValueError(f"unsupported source_format: {data.get('source_format')!r}")
-    target = data.get("target")
-    if target != "lava":
-        raise ValueError("target must be 'lava'")
-    input_size = _expect_int(data, "input_size")
-    output_size = _expect_int(data, "output_size")
-    weight_bits = _expect_int(data, "weight_bits")
-    timestep_us = _expect_positive_number(data, "timestep_us")
-    process = _expect_string_map(
-        data.get("process"),
-        required_keys=("dense_class", "lif_class", "run_config_hint"),
-        field="process",
-    )
-    ports = _expect_string_map(
-        data.get("ports"),
-        required_keys=("dense_input", "dense_output", "lif_input", "lif_output"),
-        field="ports",
-    )
-    lava_lif_params = _expect_lava_lif_params(data.get("lava_lif_params"), output_size)
-    neuron = _expect_float_map(
-        data.get("neuron"),
-        required_keys=("tau_mem", "decay", "threshold", "reset"),
-        field="neuron",
-    )
-    quantization = _expect_quantization(data.get("quantization"))
-    notes = _expect_string_list(data.get("notes"))
-    metadata = _expect_metadata(data.get("metadata", {}))
-    return LavaDenseLIFSpec(
-        format=LAVA_DENSE_LIF_EXPORT_FORMAT,
-        source_format=QUANTIZED_HARDWARE_EXPORT_FORMAT,
-        target="lava",
-        quantized_export_path=_expect_nonempty_string(data, "quantized_export_path"),
-        input_size=input_size,
-        output_size=output_size,
-        weight_bits=weight_bits,
-        timestep_us=timestep_us,
-        process=process,
-        ports=ports,
-        lava_lif_params=lava_lif_params,
-        neuron=neuron,
-        quantization=quantization,
-        notes=notes,
-        metadata=metadata,
-    )
-
-
 def read_hardware_export(path: str | Path) -> DenseLIFHardwareExport:
     """Read a dense LIF hardware export JSON artifact."""
 
@@ -555,15 +391,6 @@ def read_hardware_export_bundle(path: str | Path) -> HardwareExportBundle:
     return hardware_export_bundle_from_dict(data)
 
 
-def read_loihi2_dense_lif_manifest(path: str | Path) -> Loihi2DenseLIFManifest:
-    """Read a Loihi 2 dense LIF manifest JSON artifact."""
-
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, Mapping):
-        raise ValueError("Loihi 2 manifest JSON must contain an object")
-    return loihi2_dense_lif_manifest_from_dict(data)
-
-
 def read_spinnaker2_dense_lif_manifest(path: str | Path) -> SpiNNaker2DenseLIFManifest:
     """Read a SpiNNaker 2 dense LIF manifest JSON artifact."""
 
@@ -571,15 +398,6 @@ def read_spinnaker2_dense_lif_manifest(path: str | Path) -> SpiNNaker2DenseLIFMa
     if not isinstance(data, Mapping):
         raise ValueError("SpiNNaker 2 manifest JSON must contain an object")
     return spinnaker2_dense_lif_manifest_from_dict(data)
-
-
-def read_lava_dense_lif_spec(path: str | Path) -> LavaDenseLIFSpec:
-    """Read a Lava dense LIF process spec JSON artifact."""
-
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, Mapping):
-        raise ValueError("Lava spec JSON must contain an object")
-    return lava_dense_lif_spec_from_dict(data)
 
 
 def export_dense_lif_layer(
@@ -754,82 +572,6 @@ def export_linear_lif_hardware_bundle(
     return bundle
 
 
-def export_loihi2_dense_lif_manifest(
-    quantized: QuantizedDenseLIFHardwareExport,
-    placement: DenseLIFPlacementPlan,
-    *,
-    quantized_export_path: str,
-    placement_plan_path: str,
-    compartments_per_core: int,
-    axons_per_core: int,
-    metadata: dict[str, str] | None = None,
-) -> Loihi2DenseLIFManifest:
-    """Build a Loihi 2-oriented manifest from quantized weights and placement.
-
-    This is an adapter artifact, not an NxSDK/NxCore program. It preserves the
-    validated generic exports while making the target constraints explicit for a
-    later SDK-specific lowering pass.
-    """
-
-    if quantized.format != QUANTIZED_HARDWARE_EXPORT_FORMAT:
-        raise ValueError("quantized must be a quantized dense LIF hardware export")
-    if placement.format != PLACEMENT_EXPORT_FORMAT:
-        raise ValueError("placement must be a dense LIF placement plan")
-    if placement.source_format != quantized.format:
-        raise ValueError("placement source_format must match quantized export format")
-    if placement.target != "loihi2":
-        raise ValueError("placement target must be 'loihi2'")
-    if (
-        quantized.input_size != placement.input_size
-        or quantized.output_size != placement.output_size
-    ):
-        raise ValueError("quantized export and placement shape must match")
-    if compartments_per_core <= 0:
-        raise ValueError("compartments_per_core must be positive")
-    if axons_per_core <= 0:
-        raise ValueError("axons_per_core must be positive")
-    for core in placement.cores:
-        if core.output_count > compartments_per_core:
-            raise ValueError("placement core output_count exceeds compartments_per_core")
-        if core.input_count > axons_per_core:
-            raise ValueError("placement core input_count exceeds axons_per_core")
-
-    timestep_us = float(quantized.timestep["dt"]) * 1_000_000.0
-    return Loihi2DenseLIFManifest(
-        format=LOIHI2_DENSE_LIF_EXPORT_FORMAT,
-        source_format=quantized.format,
-        target="loihi2",
-        quantized_export_path=quantized_export_path,
-        placement_plan_path=placement_plan_path,
-        input_size=quantized.input_size,
-        output_size=quantized.output_size,
-        core_count=placement.core_count,
-        total_synapse_count=placement.total_synapse_count,
-        compartments_per_core=compartments_per_core,
-        axons_per_core=axons_per_core,
-        weight_bits=int(quantized.quantization["num_bits"]),
-        timestep_us=timestep_us,
-        neuron=dict(quantized.neuron),
-        mapping=[
-            {
-                "core_id": core.core_id,
-                "input_start": core.input_start,
-                "input_end": core.input_end,
-                "output_start": core.output_start,
-                "output_end": core.output_end,
-                "synapse_count": core.synapse_count,
-                "requires_accumulator": core.requires_accumulator,
-            }
-            for core in placement.cores
-        ],
-        notes=[
-            "Adapter manifest only; SDK-specific Loihi 2 objects are not emitted.",
-            "Weights and bias are in the referenced signed-symmetric quantized dense LIF export.",
-        ],
-        metadata=dict(metadata or quantized.metadata),
-    )
-
-
 def export_spinnaker2_dense_lif_manifest(
     quantized: QuantizedDenseLIFHardwareExport,
     placement: DenseLIFPlacementPlan,
@@ -907,87 +649,6 @@ def export_spinnaker2_dense_lif_manifest(
     )
 
 
-def export_lava_dense_lif_spec(
-    quantized: QuantizedDenseLIFHardwareExport,
-    *,
-    quantized_export_path: str,
-    metadata: dict[str, str] | None = None,
-    require_zero_reset: bool = True,
-) -> LavaDenseLIFSpec:
-    """Build a Lava ``Dense`` + ``LIF`` process spec from a quantized dense LIF export.
-
-    The spec is intentionally a Lava-facing handoff artifact, not an imported
-    Lava object. This keeps Lava optional while making the exact process classes,
-    ports, and parameter mapping explicit for a later executable builder.
-    """
-
-    if quantized.format != QUANTIZED_HARDWARE_EXPORT_FORMAT:
-        raise ValueError("quantized must be a quantized dense LIF hardware export")
-    reset = float(quantized.neuron["reset"])
-    if require_zero_reset and reset != 0.0:
-        raise ValueError("Lava stock LIF resets voltage to zero; export requires reset == 0.0")
-
-    tau_mem = float(quantized.neuron["tau_mem"])
-    threshold = float(quantized.neuron["threshold"])
-    bias = [0 for _ in range(quantized.output_size)] if quantized.bias is None else quantized.bias
-    timestep_us = float(quantized.timestep["dt"]) * 1_000_000.0
-    return LavaDenseLIFSpec(
-        format=LAVA_DENSE_LIF_EXPORT_FORMAT,
-        source_format=quantized.format,
-        target="lava",
-        quantized_export_path=quantized_export_path,
-        input_size=quantized.input_size,
-        output_size=quantized.output_size,
-        weight_bits=int(quantized.quantization["num_bits"]),
-        timestep_us=timestep_us,
-        process={
-            "dense_class": "lava.proc.dense.process.Dense",
-            "lif_class": "lava.proc.lif.process.LIF",
-            "run_config_hint": (
-                "Loihi2SimCfg or Loihi2HwCfg when available; CPU simulation otherwise."
-            ),
-        },
-        ports={
-            "dense_input": "Dense.s_in",
-            "dense_output": "Dense.a_out",
-            "lif_input": "LIF.a_in",
-            "lif_output": "LIF.s_out",
-        },
-        lava_lif_params={
-            "shape": [quantized.output_size],
-            "du": 1.0,
-            "dv": 1.0 / tau_mem,
-            "bias_mant": bias,
-            "bias_exp": 0,
-            "vth": threshold,
-        },
-        neuron=dict(quantized.neuron),
-        quantization=dict(quantized.quantization),
-        notes=[
-            (
-                "Adapter spec only; executable Lava processes are not constructed unless "
-                "Lava is installed."
-            ),
-            "Dense weights and optional bias are in the referenced quantized export.",
-            "The mapping uses Lava LIF du=1.0 so current does not carry state between timesteps.",
-            "The mapping uses dv=1/tau_mem to match spiker's membrane decay convention.",
-            "Stock Lava LIF resets voltage to zero, so exact export requires reset == 0.0.",
-        ],
-        metadata=dict(metadata or quantized.metadata),
-    )
-
-
-def write_loihi2_dense_lif_manifest(
-    manifest: Loihi2DenseLIFManifest,
-    path: str | Path,
-    *,
-    indent: int | None = 2,
-) -> None:
-    """Write a Loihi 2 dense LIF manifest JSON artifact."""
-
-    Path(path).write_text(manifest.to_json(indent=indent) + "\n", encoding="utf-8")
-
-
 def write_spinnaker2_dense_lif_manifest(
     manifest: SpiNNaker2DenseLIFManifest,
     path: str | Path,
@@ -997,17 +658,6 @@ def write_spinnaker2_dense_lif_manifest(
     """Write a SpiNNaker 2 dense LIF manifest JSON artifact."""
 
     Path(path).write_text(manifest.to_json(indent=indent) + "\n", encoding="utf-8")
-
-
-def write_lava_dense_lif_spec(
-    spec: LavaDenseLIFSpec,
-    path: str | Path,
-    *,
-    indent: int | None = 2,
-) -> None:
-    """Write a Lava dense LIF process spec JSON artifact."""
-
-    Path(path).write_text(spec.to_json(indent=indent) + "\n", encoding="utf-8")
 
 
 def quantize_dense_lif_export(
@@ -1230,59 +880,6 @@ def _expect_float_map(
             raise ValueError(f"{field}.{key} must be a number")
         result[key] = float(item)
     return result
-
-
-def _expect_string_map(
-    value: object,
-    *,
-    required_keys: tuple[str, ...],
-    field: str,
-) -> dict[str, str]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{field} must be an object")
-    result: dict[str, str] = {}
-    for key in required_keys:
-        item = value.get(key)
-        if not isinstance(item, str) or not item:
-            raise ValueError(f"{field}.{key} must be a non-empty string")
-        result[key] = item
-    return result
-
-
-def _expect_lava_lif_params(value: object, output_size: int) -> dict[str, float | int | list[int]]:
-    if not isinstance(value, Mapping):
-        raise ValueError("lava_lif_params must be an object")
-    shape = value.get("shape")
-    if not isinstance(shape, list) or shape != [output_size]:
-        raise ValueError("lava_lif_params.shape must match [output_size]")
-    du = value.get("du")
-    dv = value.get("dv")
-    bias_exp = value.get("bias_exp")
-    vth = value.get("vth")
-    bias_mant = value.get("bias_mant")
-    if not isinstance(du, int | float) or du < 0:
-        raise ValueError("lava_lif_params.du must be a non-negative number")
-    if not isinstance(dv, int | float) or dv < 0:
-        raise ValueError("lava_lif_params.dv must be a non-negative number")
-    if not isinstance(bias_exp, int):
-        raise ValueError("lava_lif_params.bias_exp must be an integer")
-    if not isinstance(vth, int | float):
-        raise ValueError("lava_lif_params.vth must be a number")
-    if not isinstance(bias_mant, list) or len(bias_mant) != output_size:
-        raise ValueError("lava_lif_params.bias_mant must be a list of length output_size")
-    parsed_bias = []
-    for item in bias_mant:
-        if not isinstance(item, int):
-            raise ValueError("lava_lif_params.bias_mant must contain only integers")
-        parsed_bias.append(item)
-    return {
-        "shape": [output_size],
-        "du": float(du),
-        "dv": float(dv),
-        "bias_mant": parsed_bias,
-        "bias_exp": bias_exp,
-        "vth": float(vth),
-    }
 
 
 def _expect_metadata(value: object) -> dict[str, str]:

@@ -472,15 +472,11 @@ real adapter must lower into target-specific communication.
 `LinearLIF`-style module and writes a manifest plus the float, quantized, and
 placement JSON artifacts into one directory.
 
-`export_loihi2_dense_lif_manifest` builds the first target-specific adapter
+`export_spinnaker2_dense_lif_manifest` builds a target-specific adapter
 artifact. It references the quantized dense export and placement plan, records
-Loihi-2-style core constraints, and emits a manifest for a later SDK lowering
-pass. It does not generate NxSDK/NxCore objects yet.
-
-`export_spinnaker2_dense_lif_manifest` provides the same adapter-manifest layer
-for SpiNNaker 2. It records per-core neuron and incoming-synapse limits, maps
-the generic placement tiles into target handoff metadata, and leaves SDK object
-generation to a later lowering pass.
+per-core neuron and incoming-synapse limits, maps the generic placement tiles
+into target handoff metadata, and emits a manifest for a later SDK lowering
+pass. It does not generate SpiNNaker SDK objects yet.
 
 ```bash
 uv run python examples/export_hardware_bundle.py --adapter spinnaker2

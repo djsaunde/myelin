@@ -10,8 +10,6 @@ import spiker
 from spiker.hardware import (
     HARDWARE_BUNDLE_FORMAT,
     HARDWARE_EXPORT_FORMAT,
-    LAVA_DENSE_LIF_EXPORT_FORMAT,
-    LOIHI2_DENSE_LIF_EXPORT_FORMAT,
     PLACEMENT_EXPORT_FORMAT,
     QUANTIZED_HARDWARE_EXPORT_FORMAT,
     SPINNAKER2_DENSE_LIF_EXPORT_FORMAT,
@@ -19,30 +17,22 @@ from spiker.hardware import (
     dense_lif_placement_plan_from_dict,
     dequantize_dense_lif_export,
     export_dense_lif_layer,
-    export_lava_dense_lif_spec,
     export_linear_lif_hardware_bundle,
     export_linear_lif_module,
-    export_loihi2_dense_lif_manifest,
     export_spinnaker2_dense_lif_manifest,
     hardware_export_bundle_from_dict,
-    lava_dense_lif_spec_from_dict,
-    loihi2_dense_lif_manifest_from_dict,
     plan_dense_lif_placement,
     quantize_dense_lif_export,
     quantized_dense_lif_hardware_export_from_dict,
     read_dense_lif_placement_plan,
     read_hardware_export,
     read_hardware_export_bundle,
-    read_lava_dense_lif_spec,
-    read_loihi2_dense_lif_manifest,
     read_quantized_hardware_export,
     read_spinnaker2_dense_lif_manifest,
     spinnaker2_dense_lif_manifest_from_dict,
     write_dense_lif_placement_plan,
     write_hardware_export,
     write_hardware_export_bundle,
-    write_lava_dense_lif_spec,
-    write_loihi2_dense_lif_manifest,
     write_quantized_hardware_export,
     write_spinnaker2_dense_lif_manifest,
 )
@@ -371,158 +361,6 @@ def test_hardware_export_bundle_round_trips_json(tmp_path: Path) -> None:
     assert read_hardware_export_bundle(path) == parsed
 
 
-def test_export_loihi2_dense_lif_manifest_round_trips_json(tmp_path: Path) -> None:
-    dense = export_dense_lif_layer(
-        torch.ones((5, 7)),
-        torch.ones(7),
-        LIFParams(tau_mem=12.0, threshold=0.75, reset=-0.1),
-        dt=0.001,
-        metadata={"run": "unit"},
-    )
-    quantized = quantize_dense_lif_export(dense, num_bits=8)
-    placement = plan_dense_lif_placement(
-        quantized,
-        max_inputs_per_core=3,
-        max_outputs_per_core=4,
-        target="loihi2",
-    )
-
-    manifest = export_loihi2_dense_lif_manifest(
-        quantized,
-        placement,
-        quantized_export_path="layer.dense_lif_quantized.json",
-        placement_plan_path="layer.dense_lif_placement.json",
-        compartments_per_core=4,
-        axons_per_core=3,
-        metadata={"target": "loihi2"},
-    )
-    parsed = loihi2_dense_lif_manifest_from_dict(json.loads(manifest.to_json()))
-    path = tmp_path / "layer.loihi2_manifest.json"
-
-    write_loihi2_dense_lif_manifest(parsed, path)
-
-    assert read_loihi2_dense_lif_manifest(path) == parsed
-    assert parsed.format == LOIHI2_DENSE_LIF_EXPORT_FORMAT
-    assert parsed.source_format == QUANTIZED_HARDWARE_EXPORT_FORMAT
-    assert parsed.target == "loihi2"
-    assert parsed.input_size == 5
-    assert parsed.output_size == 7
-    assert parsed.core_count == placement.core_count
-    assert parsed.total_synapse_count == 35
-    assert parsed.weight_bits == 8
-    assert parsed.timestep_us == pytest.approx(1000.0)
-    assert parsed.neuron == dense.neuron
-    assert parsed.mapping[0] == {
-        "core_id": 0,
-        "input_start": 0,
-        "input_end": 3,
-        "output_start": 0,
-        "output_end": 4,
-        "synapse_count": 12,
-        "requires_accumulator": True,
-    }
-    assert parsed.metadata == {"target": "loihi2"}
-
-
-def test_export_loihi2_dense_lif_manifest_rejects_constraint_mismatch() -> None:
-    dense = export_dense_lif_layer(torch.ones((4, 4)), None, LIFParams())
-    quantized = quantize_dense_lif_export(dense, num_bits=8)
-    placement = plan_dense_lif_placement(
-        quantized,
-        max_inputs_per_core=4,
-        max_outputs_per_core=4,
-        target="loihi2",
-    )
-
-    with pytest.raises(ValueError, match="compartments_per_core"):
-        export_loihi2_dense_lif_manifest(
-            quantized,
-            placement,
-            quantized_export_path="q.json",
-            placement_plan_path="p.json",
-            compartments_per_core=3,
-            axons_per_core=4,
-        )
-
-    generic_placement = plan_dense_lif_placement(
-        quantized,
-        max_inputs_per_core=4,
-        max_outputs_per_core=4,
-        target="generic",
-    )
-    with pytest.raises(ValueError, match="target"):
-        export_loihi2_dense_lif_manifest(
-            quantized,
-            generic_placement,
-            quantized_export_path="q.json",
-            placement_plan_path="p.json",
-            compartments_per_core=4,
-            axons_per_core=4,
-        )
-
-
-def test_export_lava_dense_lif_spec_round_trips_json(tmp_path: Path) -> None:
-    dense = export_dense_lif_layer(
-        torch.tensor([[0.0, 0.25, -0.5], [0.75, -1.0, 0.5]]),
-        torch.tensor([0.1, -0.2, 0.3]),
-        LIFParams(tau_mem=8.0, threshold=0.75, reset=0.0),
-        dt=0.001,
-        metadata={"run": "lava"},
-    )
-    quantized = quantize_dense_lif_export(dense, num_bits=8)
-
-    spec = export_lava_dense_lif_spec(
-        quantized,
-        quantized_export_path="layer.dense_lif_quantized.json",
-        metadata={"target": "lava"},
-    )
-    parsed = lava_dense_lif_spec_from_dict(json.loads(spec.to_json()))
-    path = tmp_path / "layer.lava_dense_lif.json"
-
-    write_lava_dense_lif_spec(parsed, path)
-
-    assert read_lava_dense_lif_spec(path) == parsed
-    assert parsed.format == LAVA_DENSE_LIF_EXPORT_FORMAT
-    assert parsed.source_format == QUANTIZED_HARDWARE_EXPORT_FORMAT
-    assert parsed.target == "lava"
-    assert parsed.input_size == 2
-    assert parsed.output_size == 3
-    assert parsed.weight_bits == 8
-    assert parsed.timestep_us == pytest.approx(1000.0)
-    assert parsed.process == {
-        "dense_class": "lava.proc.dense.process.Dense",
-        "lif_class": "lava.proc.lif.process.LIF",
-        "run_config_hint": "Loihi2SimCfg or Loihi2HwCfg when available; CPU simulation otherwise.",
-    }
-    assert parsed.ports == {
-        "dense_input": "Dense.s_in",
-        "dense_output": "Dense.a_out",
-        "lif_input": "LIF.a_in",
-        "lif_output": "LIF.s_out",
-    }
-    assert parsed.lava_lif_params["shape"] == [3]
-    assert parsed.lava_lif_params["du"] == pytest.approx(1.0)
-    assert parsed.lava_lif_params["dv"] == pytest.approx(1.0 / 8.0)
-    assert parsed.lava_lif_params["bias_mant"] == quantized.bias
-    assert parsed.lava_lif_params["bias_exp"] == 0
-    assert parsed.lava_lif_params["vth"] == pytest.approx(0.75)
-    assert parsed.neuron == dense.neuron
-    assert parsed.quantization == quantized.quantization
-    assert parsed.metadata == {"target": "lava"}
-
-
-def test_export_lava_dense_lif_spec_rejects_nonzero_reset_by_default() -> None:
-    dense = export_dense_lif_layer(
-        torch.ones((2, 3)),
-        None,
-        LIFParams(reset=-0.1),
-    )
-    quantized = quantize_dense_lif_export(dense)
-
-    with pytest.raises(ValueError, match="reset == 0.0"):
-        export_lava_dense_lif_spec(quantized, quantized_export_path="q.json")
-
-
 def test_export_spinnaker2_dense_lif_manifest_round_trips_json(tmp_path: Path) -> None:
     dense = export_dense_lif_layer(
         torch.ones((5, 7)),
@@ -663,8 +501,6 @@ def test_export_linear_lif_module_rejects_non_lif_module() -> None:
 def test_hardware_exports_are_public() -> None:
     assert spiker.HARDWARE_BUNDLE_FORMAT == HARDWARE_BUNDLE_FORMAT
     assert spiker.HARDWARE_EXPORT_FORMAT == HARDWARE_EXPORT_FORMAT
-    assert spiker.LAVA_DENSE_LIF_EXPORT_FORMAT == LAVA_DENSE_LIF_EXPORT_FORMAT
-    assert spiker.LOIHI2_DENSE_LIF_EXPORT_FORMAT == LOIHI2_DENSE_LIF_EXPORT_FORMAT
     assert spiker.PLACEMENT_EXPORT_FORMAT == PLACEMENT_EXPORT_FORMAT
     assert spiker.QUANTIZED_HARDWARE_EXPORT_FORMAT == QUANTIZED_HARDWARE_EXPORT_FORMAT
     assert spiker.SPINNAKER2_DENSE_LIF_EXPORT_FORMAT == SPINNAKER2_DENSE_LIF_EXPORT_FORMAT
@@ -672,8 +508,6 @@ def test_hardware_exports_are_public() -> None:
     assert spiker.DenseLIFPlacementCore is not None
     assert spiker.DenseLIFPlacementPlan is not None
     assert spiker.HardwareExportBundle is not None
-    assert spiker.LavaDenseLIFSpec is not None
-    assert spiker.Loihi2DenseLIFManifest is not None
     assert spiker.QuantizedDenseLIFHardwareExport is not None
     assert spiker.SpiNNaker2DenseLIFManifest is not None
     assert spiker.export_dense_lif_layer is export_dense_lif_layer
@@ -681,16 +515,12 @@ def test_hardware_exports_are_public() -> None:
     assert spiker.dense_lif_hardware_export_from_dict is dense_lif_hardware_export_from_dict
     assert spiker.dense_lif_placement_plan_from_dict is dense_lif_placement_plan_from_dict
     assert spiker.hardware_export_bundle_from_dict is hardware_export_bundle_from_dict
-    assert spiker.lava_dense_lif_spec_from_dict is lava_dense_lif_spec_from_dict
     assert (
         spiker.quantized_dense_lif_hardware_export_from_dict
         is quantized_dense_lif_hardware_export_from_dict
     )
     assert spiker.export_linear_lif_hardware_bundle is export_linear_lif_hardware_bundle
-    assert spiker.export_lava_dense_lif_spec is export_lava_dense_lif_spec
-    assert spiker.export_loihi2_dense_lif_manifest is export_loihi2_dense_lif_manifest
     assert spiker.export_spinnaker2_dense_lif_manifest is export_spinnaker2_dense_lif_manifest
-    assert spiker.loihi2_dense_lif_manifest_from_dict is loihi2_dense_lif_manifest_from_dict
     assert spiker.spinnaker2_dense_lif_manifest_from_dict is spinnaker2_dense_lif_manifest_from_dict
     assert spiker.plan_dense_lif_placement is plan_dense_lif_placement
     assert spiker.quantize_dense_lif_export is quantize_dense_lif_export
@@ -698,14 +528,10 @@ def test_hardware_exports_are_public() -> None:
     assert spiker.read_dense_lif_placement_plan is read_dense_lif_placement_plan
     assert spiker.read_hardware_export is read_hardware_export
     assert spiker.read_hardware_export_bundle is read_hardware_export_bundle
-    assert spiker.read_lava_dense_lif_spec is read_lava_dense_lif_spec
-    assert spiker.read_loihi2_dense_lif_manifest is read_loihi2_dense_lif_manifest
     assert spiker.read_quantized_hardware_export is read_quantized_hardware_export
     assert spiker.read_spinnaker2_dense_lif_manifest is read_spinnaker2_dense_lif_manifest
     assert spiker.write_dense_lif_placement_plan is write_dense_lif_placement_plan
     assert spiker.write_hardware_export is write_hardware_export
     assert spiker.write_hardware_export_bundle is write_hardware_export_bundle
-    assert spiker.write_lava_dense_lif_spec is write_lava_dense_lif_spec
-    assert spiker.write_loihi2_dense_lif_manifest is write_loihi2_dense_lif_manifest
     assert spiker.write_quantized_hardware_export is write_quantized_hardware_export
     assert spiker.write_spinnaker2_dense_lif_manifest is write_spinnaker2_dense_lif_manifest

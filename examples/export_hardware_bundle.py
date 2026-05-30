@@ -11,20 +11,14 @@ from example_utils import print_model_summary
 from spiker import (
     LIFParams,
     LinearLIF,
-    export_lava_dense_lif_spec,
     export_linear_lif_hardware_bundle,
-    export_loihi2_dense_lif_manifest,
     export_spinnaker2_dense_lif_manifest,
     plan_dense_lif_placement,
     read_dense_lif_placement_plan,
     read_hardware_export,
-    read_lava_dense_lif_spec,
-    read_loihi2_dense_lif_manifest,
     read_quantized_hardware_export,
     read_spinnaker2_dense_lif_manifest,
     write_dense_lif_placement_plan,
-    write_lava_dense_lif_spec,
-    write_loihi2_dense_lif_manifest,
     write_spinnaker2_dense_lif_manifest,
 )
 
@@ -92,9 +86,7 @@ def main() -> None:
     parser.add_argument("--max-inputs-per-core", type=int, default=4)
     parser.add_argument("--max-outputs-per-core", type=int, default=6)
     parser.add_argument("--target", default="generic")
-    parser.add_argument("--adapter", choices=("lava", "loihi2", "spinnaker2", "both", "all"))
-    parser.add_argument("--loihi-compartments-per-core", type=int, default=1024)
-    parser.add_argument("--loihi-axons-per-core", type=int, default=4096)
+    parser.add_argument("--adapter", choices=("spinnaker2", "all"))
     parser.add_argument("--spinnaker-neurons-per-core", type=int, default=256)
     parser.add_argument("--spinnaker-incoming-synapses-per-core", type=int, default=65536)
     parser.add_argument("--seed", type=int, default=0)
@@ -110,9 +102,7 @@ def main() -> None:
     print()
 
     target = args.target
-    if args.adapter == "loihi2":
-        target = "loihi2"
-    elif args.adapter == "spinnaker2":
+    if args.adapter == "spinnaker2":
         target = "spinnaker2"
     bundle = export_linear_lif_hardware_bundle(
         layer,
@@ -131,56 +121,7 @@ def main() -> None:
     quantized = read_quantized_hardware_export(args.output_dir / bundle.quantized_export_path)
     placement = read_dense_lif_placement_plan(args.output_dir / bundle.placement_plan_path)
     adapter_artifacts: list[tuple[str, str, str]] = []
-    if args.adapter in {"lava", "all"}:
-        adapter_path = f"{args.prefix}.lava_dense_lif.json"
-        adapter = export_lava_dense_lif_spec(
-            quantized,
-            quantized_export_path=bundle.quantized_export_path,
-            metadata={"example": "export_hardware_bundle", "adapter": "lava"},
-        )
-        write_lava_dense_lif_spec(adapter, args.output_dir / adapter_path)
-        adapter_artifacts.append(
-            (
-                "lava_process_spec",
-                adapter_path,
-                read_lava_dense_lif_spec(args.output_dir / adapter_path).format,
-            )
-        )
-    if args.adapter in {"loihi2", "both", "all"}:
-        loihi_placement = placement
-        loihi_placement_path = bundle.placement_plan_path
-        if target != "loihi2":
-            loihi_placement = plan_dense_lif_placement(
-                quantized,
-                max_inputs_per_core=args.max_inputs_per_core,
-                max_outputs_per_core=args.max_outputs_per_core,
-                target="loihi2",
-                metadata={"example": "export_hardware_bundle", "adapter": "loihi2"},
-            )
-            loihi_placement_path = f"{args.prefix}.loihi2.dense_lif_placement.json"
-            write_dense_lif_placement_plan(loihi_placement, args.output_dir / loihi_placement_path)
-            adapter_artifacts.append(
-                ("loihi2_placement_plan", loihi_placement_path, loihi_placement.format)
-            )
-        adapter_path = f"{args.prefix}.loihi2_manifest.json"
-        adapter = export_loihi2_dense_lif_manifest(
-            quantized,
-            loihi_placement,
-            quantized_export_path=bundle.quantized_export_path,
-            placement_plan_path=loihi_placement_path,
-            compartments_per_core=args.loihi_compartments_per_core,
-            axons_per_core=args.loihi_axons_per_core,
-            metadata={"example": "export_hardware_bundle", "adapter": "loihi2"},
-        )
-        write_loihi2_dense_lif_manifest(adapter, args.output_dir / adapter_path)
-        adapter_artifacts.append(
-            (
-                "loihi2_adapter_manifest",
-                adapter_path,
-                read_loihi2_dense_lif_manifest(args.output_dir / adapter_path).format,
-            )
-        )
-    if args.adapter in {"spinnaker2", "both", "all"}:
+    if args.adapter in {"spinnaker2", "all"}:
         spinnaker_placement = placement
         spinnaker_placement_path = bundle.placement_plan_path
         if target != "spinnaker2":

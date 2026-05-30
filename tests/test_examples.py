@@ -420,39 +420,6 @@ def test_export_hardware_bundle_example_runs(tmp_path: Path) -> None:
 
 
 @pytest.mark.extended
-def test_export_hardware_bundle_example_writes_lava_adapter(tmp_path: Path) -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(example),
-            "--output-dir",
-            str(tmp_path),
-            "--prefix",
-            "unit",
-            "--in-features",
-            "3",
-            "--out-features",
-            "5",
-            "--max-inputs-per-core",
-            "2",
-            "--max-outputs-per-core",
-            "3",
-            "--adapter",
-            "lava",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert "| lava_process_spec |" in result.stdout
-    assert "spiker.lava_dense_lif_spec.v0" in result.stdout
-    assert (tmp_path / "unit.lava_dense_lif.json").exists()
-
-
-@pytest.mark.extended
 def test_export_hardware_bundle_example_writes_spinnaker_adapter(tmp_path: Path) -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
 
@@ -483,40 +450,3 @@ def test_export_hardware_bundle_example_writes_spinnaker_adapter(tmp_path: Path)
     assert "| spinnaker2_adapter_manifest |" in result.stdout
     assert "spiker.spinnaker2_dense_lif_manifest.v0" in result.stdout
     assert (tmp_path / "unit.spinnaker2_manifest.json").exists()
-
-
-@pytest.mark.extended
-def test_export_hardware_bundle_example_writes_both_adapters(tmp_path: Path) -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(example),
-            "--output-dir",
-            str(tmp_path),
-            "--prefix",
-            "unit",
-            "--in-features",
-            "3",
-            "--out-features",
-            "5",
-            "--max-inputs-per-core",
-            "2",
-            "--max-outputs-per-core",
-            "3",
-            "--adapter",
-            "both",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert "| loihi2_adapter_manifest |" in result.stdout
-    assert "| spinnaker2_adapter_manifest |" in result.stdout
-    assert (tmp_path / "unit.hardware_bundle.json").exists()
-    assert (tmp_path / "unit.loihi2_manifest.json").exists()
-    assert (tmp_path / "unit.loihi2.dense_lif_placement.json").exists()
-    assert (tmp_path / "unit.spinnaker2_manifest.json").exists()
-    assert (tmp_path / "unit.spinnaker2.dense_lif_placement.json").exists()

@@ -20,5 +20,8 @@ wandb/
 # Generated benchmark/debug artifacts
 benchmarks/compile_debug/
 
+# Local training/inference run outputs
+runs/
+
 # Local datasets
 data/

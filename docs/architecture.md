@@ -631,7 +631,6 @@ spiker.hardware_bundle.v0 JSON artifact
 target adapter manifest
         |
         v
-spiker.loihi2_dense_lif_manifest.v0 or
 spiker.spinnaker2_dense_lif_manifest.v0 JSON artifact
 ```
 
@@ -653,39 +652,33 @@ target-prep artifacts that hardware adapters can further constrain or reject.
 the quantized dense layer into core-local input and output ranges, records each
 tile's synapse count, and marks tiles that require cross-core accumulation
 because the same output range receives multiple input shards. This is still
-generic: it does not choose Loihi compartments, SpiNNaker vertices, packet
-formats, or host/runtime APIs. It gives those future adapters a concrete plan
-to accept, refine, or reject.
+generic: it does not choose SpiNNaker vertices, packet formats, or host/runtime
+APIs. It gives those future adapters a concrete plan to accept, refine, or
+reject.
 
 `export_linear_lif_hardware_bundle` runs this full generic pipeline for a
 `LinearLIF`-style module and writes the float export, quantized export,
 placement plan, and `spiker.hardware_bundle.v0` manifest into a single
 directory. The manifest keeps artifact filenames, format versions, target name,
-and summary counts together so a future Loihi/SpiNNaker adapter has one stable
-entry point.
+and summary counts together so a future SpiNNaker adapter has one stable entry
+point.
 
 `examples/export_hardware_bundle.py` is the runnable smoke path for this bridge.
 It creates a deterministic `LinearLIF`, prints a model parameter summary, writes
 the bundle directory, and reports artifact paths in Markdown tables. Its
-`--adapter both` mode keeps the primary bundle generic while also writing
-Loihi2 and SpiNNaker2 placement/manifests, which makes the current M7 handoff
-surface reproducible from one command.
+`--adapter spinnaker2` mode keeps the primary bundle generic while also writing
+the SpiNNaker2 placement/manifest, which makes the current M7 handoff surface
+reproducible from one command.
 
-`export_loihi2_dense_lif_manifest` is the first target-specific adapter
-artifact. It accepts a quantized dense LIF export plus a placement plan whose
-target is `loihi2`, validates Loihi-2-style compartment and axon limits for
-each tile, records timestep in microseconds, and emits
-`spiker.loihi2_dense_lif_manifest.v0`. The manifest references the generic
-quantized and placement artifacts instead of duplicating weights. It is not an
-NxSDK/NxCore program yet; it is a validated handoff object for a future SDK
-lowering pass.
-
-`export_spinnaker2_dense_lif_manifest` follows the same handoff pattern for
-SpiNNaker 2. It requires a placement target of `spinnaker2`, validates
-per-core neuron and incoming-synapse limits, records timestep in milliseconds,
-and emits `spiker.spinnaker2_dense_lif_manifest.v0`. Dense input shard
-accumulation is preserved in each mapping entry through `requires_accumulator`
-so a later SpiNNaker lowerer can decide how to route partial sums.
+`export_spinnaker2_dense_lif_manifest` is the target-specific adapter artifact.
+It accepts a quantized dense LIF export plus a placement plan whose target is
+`spinnaker2`, validates per-core neuron and incoming-synapse limits, records
+timestep in milliseconds, and emits `spiker.spinnaker2_dense_lif_manifest.v0`.
+The manifest references the generic quantized and placement artifacts instead of
+duplicating weights. Dense input shard accumulation is preserved in each mapping
+entry through `requires_accumulator` so a later SpiNNaker lowerer can decide how
+to route partial sums. It is not a SpiNNaker SDK program yet; it is a validated
+handoff object for a future SDK lowering pass.
 
 The bridge still needs real target SDK adapters and checks that hardware
 timestep/reset semantics match the training-time model.

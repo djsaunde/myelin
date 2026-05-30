@@ -17,7 +17,7 @@ The current v0 training-path recommendation is tracked separately in
 | M4 bitpacked spikes | Partial | `PackedSpikes`, PyTorch/Triton pack/unpack/count/rate, public `lif_forward_packed_spikes`, `linear_surrogate_lif_packed_forward`, and `LinearSurrogateLIFPacked`, packed saved spike traces, `benchmarks/results/packed_forward_5090.md`, `benchmarks/results/bitpack_5090.md` | Public training outputs and some internal spike tensors still use dense storage |
 | M5 distributed | Started | Packed spike all-gather/count/rate all-reduce helpers, CUDA packed row-count kernel, `wrap_fsdp_if_initialized`, two-rank Gloo smoke, and local NCCL smoke artifacts | Custom sparse/packed collectives and real multi-GPU benchmarks |
 | M6 online learning rules | Started | LIF and ALIF dense eligibility-trace oracles, `LinearOnlineLIF`/`LinearOnlineALIF` wrappers, and CPU/CUDA `online_learning` benchmarks | Richer e-prop variants and lower-memory online traces |
-| M7 hardware bridge | Started | `spiker.hardware` dense LIF JSON export schema, signed symmetric quantized export schema, generic placement plan, bundle manifest, Loihi 2 and SpiNNaker 2 adapter manifests, and round-trip tests | Target SDK object generation |
+| M7 hardware bridge | Started | `spiker.hardware` dense LIF JSON export schema, signed symmetric quantized export schema, generic placement plan, bundle manifest, SpiNNaker 2 adapter manifest, and round-trip tests | Target SDK object generation |
 
 ## What Is Working
 
@@ -115,14 +115,13 @@ The current v0 training-path recommendation is tracked separately in
   core-tiling artifact with accumulator requirements for split input shards.
   `export_linear_lif_hardware_bundle` writes the float, quantized, placement,
   and manifest artifacts for a `LinearLIF`-style module into one directory.
-  `export_loihi2_dense_lif_manifest` derives a
-  `spiker.loihi2_dense_lif_manifest.v0` adapter artifact with explicit
-  compartment/axon constraints and mapping ranges for a later Loihi 2 SDK
-  lowering pass. `export_spinnaker2_dense_lif_manifest` derives the equivalent
+  `export_spinnaker2_dense_lif_manifest` derives a
   `spiker.spinnaker2_dense_lif_manifest.v0` handoff artifact with per-core
-  neuron and incoming-synapse constraints.
-  `examples/export_hardware_bundle.py --adapter both` is the runnable smoke
-  path and writes both target handoff manifests from one deterministic layer.
+  neuron and incoming-synapse constraints and mapping ranges for a later
+  SpiNNaker 2 SDK lowering pass.
+  `examples/export_hardware_bundle.py --adapter spinnaker2` is the runnable
+  smoke path and writes the target handoff manifest from one deterministic
+  layer.
 - MNIST, convolutional MNIST, low-memory MNIST rate-readout, spike-rate, and
   custom LIF rate-readout, and snnTorch comparison examples are present, with
   model summaries, step-time logging, grad clipping, and optional W&B logging
@@ -234,7 +233,7 @@ above for strategy-level compiled-vs-Triton conclusions.
 | Single-GPU NCCL packed count/rate smoke | `T=100, B=64, N=2048, world=1` | dense count 0.059 ms vs packed count/rate 0.085/0.101 ms, zero count/rate max error; validates CUDA path, not multi-GPU communication |
 | Online learning CPU smoke | `T=4, B=2, F=3, N=5` | LIF online 0.303 ms, ALIF online 0.437 ms, LIF BPTT 0.554 ms, ALIF BPTT 0.520 ms |
 | Online learning CUDA | `T=100, B=64, F=128, N=512` | LIF online 37.556 ms / 74.2 MB, ALIF online 53.922 ms / 111.2 MB, custom surrogate LIF/ALIF 38.097/51.137 ms at same memory |
-| Hardware bridge bundle | `LinearLIF F=3, N=5` | Runner-generated smoke writes generic float/quantized/placement bundle plus Loihi2 and SpiNNaker2 adapter manifests; 4 generic placement cores, 15 synapses |
+| Hardware bridge bundle | `LinearLIF F=3, N=5` | Runner-generated smoke writes generic float/quantized/placement bundle plus SpiNNaker2 adapter manifest; 4 generic placement cores, 15 synapses |
 
 The most important lesson so far is that `torch.compile` is a serious baseline,
 but the benchmark boundary matters. It can eliminate or hide nominal
@@ -298,5 +297,4 @@ we avoid dense unpack/backward scratch. Replay through PyTorch is much slower.
    still needs a real generic backward contract.
 4. Run the distributed NCCL benchmark on a multi-GPU host and add those numbers
    beside the current single-GPU NCCL smoke artifact.
-5. Add real SDK lowerers for the current Loihi 2 and SpiNNaker 2 adapter
-   manifests.
+5. Add a real SDK lowerer for the current SpiNNaker 2 adapter manifest.

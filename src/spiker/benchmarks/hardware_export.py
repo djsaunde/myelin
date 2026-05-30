@@ -14,24 +14,16 @@ from spiker.hardware import (
     DenseLIFHardwareExport,
     DenseLIFPlacementPlan,
     HardwareExportBundle,
-    LavaDenseLIFSpec,
-    Loihi2DenseLIFManifest,
     QuantizedDenseLIFHardwareExport,
     SpiNNaker2DenseLIFManifest,
-    export_lava_dense_lif_spec,
     export_linear_lif_hardware_bundle,
-    export_loihi2_dense_lif_manifest,
     export_spinnaker2_dense_lif_manifest,
     plan_dense_lif_placement,
     read_dense_lif_placement_plan,
     read_hardware_export,
-    read_lava_dense_lif_spec,
-    read_loihi2_dense_lif_manifest,
     read_quantized_hardware_export,
     read_spinnaker2_dense_lif_manifest,
     write_dense_lif_placement_plan,
-    write_lava_dense_lif_spec,
-    write_loihi2_dense_lif_manifest,
     write_spinnaker2_dense_lif_manifest,
 )
 from spiker.modules import LinearLIF
@@ -68,34 +60,6 @@ def write_export_artifacts(args: argparse.Namespace, output_dir: Path) -> dict[s
         metadata={"benchmark": "hardware_export"},
     )
     quantized = read_quantized_hardware_export(output_dir / bundle.quantized_export_path)
-    lava_spec_path = f"{args.prefix}.lava_dense_lif.json"
-    lava_spec = export_lava_dense_lif_spec(
-        quantized,
-        quantized_export_path=bundle.quantized_export_path,
-        metadata={"benchmark": "hardware_export", "adapter": "lava"},
-    )
-    write_lava_dense_lif_spec(lava_spec, output_dir / lava_spec_path)
-
-    loihi_placement = plan_dense_lif_placement(
-        quantized,
-        max_inputs_per_core=args.max_inputs_per_core,
-        max_outputs_per_core=args.max_outputs_per_core,
-        target="loihi2",
-        metadata={"benchmark": "hardware_export", "adapter": "loihi2"},
-    )
-    loihi_placement_path = f"{args.prefix}.loihi2.dense_lif_placement.json"
-    write_dense_lif_placement_plan(loihi_placement, output_dir / loihi_placement_path)
-    loihi_manifest_path = f"{args.prefix}.loihi2_manifest.json"
-    loihi_manifest = export_loihi2_dense_lif_manifest(
-        quantized,
-        loihi_placement,
-        quantized_export_path=bundle.quantized_export_path,
-        placement_plan_path=loihi_placement_path,
-        compartments_per_core=args.loihi_compartments_per_core,
-        axons_per_core=args.loihi_axons_per_core,
-        metadata={"benchmark": "hardware_export", "adapter": "loihi2"},
-    )
-    write_loihi2_dense_lif_manifest(loihi_manifest, output_dir / loihi_manifest_path)
 
     spinnaker_placement = plan_dense_lif_placement(
         quantized,
@@ -124,16 +88,10 @@ def write_export_artifacts(args: argparse.Namespace, output_dir: Path) -> dict[s
         "dense": read_hardware_export(output_dir / bundle.dense_export_path),
         "quantized": quantized,
         "placement": read_dense_lif_placement_plan(output_dir / bundle.placement_plan_path),
-        "lava_spec": read_lava_dense_lif_spec(output_dir / lava_spec_path),
-        "lava_spec_path": lava_spec_path,
-        "loihi_placement": read_dense_lif_placement_plan(output_dir / loihi_placement_path),
         "spinnaker_placement": read_dense_lif_placement_plan(output_dir / spinnaker_placement_path),
-        "loihi_manifest": read_loihi2_dense_lif_manifest(output_dir / loihi_manifest_path),
         "spinnaker_manifest": read_spinnaker2_dense_lif_manifest(
             output_dir / spinnaker_manifest_path
         ),
-        "loihi_placement_path": loihi_placement_path,
-        "loihi_manifest_path": loihi_manifest_path,
         "spinnaker_placement_path": spinnaker_placement_path,
         "spinnaker_manifest_path": spinnaker_manifest_path,
     }
@@ -146,10 +104,7 @@ def print_markdown(
     dense = cast(DenseLIFHardwareExport, artifacts["dense"])
     quantized = cast(QuantizedDenseLIFHardwareExport, artifacts["quantized"])
     placement = cast(DenseLIFPlacementPlan, artifacts["placement"])
-    lava_spec = cast(LavaDenseLIFSpec, artifacts["lava_spec"])
-    loihi_placement = cast(DenseLIFPlacementPlan, artifacts["loihi_placement"])
     spinnaker_placement = cast(DenseLIFPlacementPlan, artifacts["spinnaker_placement"])
-    loihi_manifest = cast(Loihi2DenseLIFManifest, artifacts["loihi_manifest"])
     spinnaker_manifest = cast(SpiNNaker2DenseLIFManifest, artifacts["spinnaker_manifest"])
 
     print("# Hardware Export Bridge Benchmark")
@@ -179,12 +134,6 @@ def print_markdown(
     print(
         f"| placement_plan | `{bundle.placement_plan_path}` | {bundle.formats['placement_plan']} |"
     )
-    print(f"| lava_process_spec | `{artifacts['lava_spec_path']}` | {lava_spec.format} |")
-    print(
-        f"| loihi2_placement_plan | `{artifacts['loihi_placement_path']}` | "
-        f"{loihi_placement.format} |"
-    )
-    print(f"| loihi2_manifest | `{artifacts['loihi_manifest_path']}` | {loihi_manifest.format} |")
     print(
         f"| spinnaker2_placement_plan | `{artifacts['spinnaker_placement_path']}` | "
         f"{spinnaker_placement.format} |"
@@ -201,8 +150,6 @@ def print_markdown(
     print(f"| dense_weight_rows | {len(dense.weight)} |")
     print(f"| quantized_weight_rows | {len(quantized.weight)} |")
     print(f"| generic_core_count | {placement.core_count} |")
-    print(f"| lava_weight_bits | {lava_spec.weight_bits} |")
-    print(f"| loihi2_core_count | {loihi_manifest.core_count} |")
     print(f"| spinnaker2_core_count | {spinnaker_manifest.core_count} |")
     print(f"| total_synapse_count | {bundle.summary['total_synapse_count']} |")
 
@@ -220,8 +167,6 @@ def main() -> None:
     parser.add_argument("--num-bits", type=int, default=8)
     parser.add_argument("--max-inputs-per-core", type=int, default=2)
     parser.add_argument("--max-outputs-per-core", type=int, default=3)
-    parser.add_argument("--loihi-compartments-per-core", type=int, default=1024)
-    parser.add_argument("--loihi-axons-per-core", type=int, default=4096)
     parser.add_argument("--spinnaker-neurons-per-core", type=int, default=256)
     parser.add_argument("--spinnaker-incoming-synapses-per-core", type=int, default=65536)
     parser.add_argument("--seed", type=int, default=0)
