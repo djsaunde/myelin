@@ -3054,3 +3054,40 @@ def test_backend_lif_forward_torch_fallback_matches_reference_on_cpu() -> None:
 
     assert torch.allclose(actual_state.membrane, expected_state.membrane)
     assert torch.equal(actual_spikes, expected_spikes)
+
+
+def test_triton_surrogate_lif_recompute_matches_store_all() -> None:
+    """The recompute backward must produce the same fwd + grads as the store-all path."""
+    from myelin.autograd import triton_surrogate_lif_recompute_function
+    from myelin.kernels import surrogate_lif_forward
+
+    torch.manual_seed(7)
+    params = LIFParams(tau_mem=2.0, threshold=1.0, reset=0.0)
+    base_x = torch.randn((6, 3, 8), device="cuda")
+    base_v = torch.zeros((3, 8), device="cuda")
+
+    def run(use_recompute: bool):
+        x = base_x.clone().requires_grad_(True)
+        v = base_v.clone().requires_grad_(True)
+        if use_recompute:
+            _, spikes = triton_surrogate_lif_recompute_function(
+                x, LIFState(membrane=v), params, surrogate="atan", surrogate_slope=2.0
+            )
+        else:
+            _, spikes = surrogate_lif_forward(
+                x,
+                LIFState(membrane=v),
+                params,
+                surrogate="atan",
+                surrogate_slope=2.0,
+                backend="triton",
+            )
+        spikes.square().sum().backward()
+        return spikes.detach(), x.grad, v.grad
+
+    spikes_store, gx_store, gv_store = run(False)
+    spikes_rec, gx_rec, gv_rec = run(True)
+    assert torch.equal(spikes_store, spikes_rec)
+    assert gx_store is not None and gx_rec is not None
+    assert torch.allclose(gx_store, gx_rec, atol=1e-5, rtol=1e-4)
+    assert torch.allclose(gv_store, gv_rec, atol=1e-5, rtol=1e-4)

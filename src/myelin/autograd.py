@@ -229,6 +229,117 @@ def triton_surrogate_lif_function(
     return LIFState(membrane=final_membrane), spikes
 
 
+class TritonSurrogateLIFRecomputeFunction(torch.autograd.Function):
+    """Triton hard-forward LIF with a recompute (checkpointed) surrogate backward.
+
+    Identical math to ``TritonSurrogateLIFFunction``, but the forward saves only
+    its inputs and initial state instead of the ``[T, B, N]`` pre-reset membrane
+    trace; the backward re-runs the forward to regenerate that trace. This trades
+    one extra forward pass for the O(T*B*N) trace memory the store-all path keeps.
+    """
+
+    @staticmethod
+    def forward(
+        ctx: Any,
+        inputs: torch.Tensor,
+        initial_membrane: torch.Tensor,
+        tau_mem: float,
+        threshold: float,
+        reset: float,
+        surrogate: SurrogateName,
+        surrogate_slope: float,
+        block_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from myelin.triton import surrogate_lif_forward
+
+        ctx.set_materialize_grads(False)
+        ctx.tau_mem = tau_mem
+        ctx.threshold = threshold
+        ctx.reset = reset
+        ctx.surrogate = surrogate
+        ctx.surrogate_slope = surrogate_slope
+        ctx.block_size = block_size
+
+        params = LIFParams(tau_mem=tau_mem, threshold=threshold, reset=reset)
+        state, spikes, _pre_reset = surrogate_lif_forward(
+            inputs,
+            LIFState(membrane=initial_membrane),
+            params,
+            block_size=block_size,
+        )
+        ctx.save_for_backward(inputs, initial_membrane)
+        return state.membrane, spikes
+
+    @staticmethod
+    def backward(
+        ctx: Any,
+        *grad_outputs: torch.Tensor | None,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, None, None, None, None, None, None, None]:
+        grad_final_membrane, grad_spikes = grad_outputs
+        if grad_final_membrane is None and grad_spikes is None:
+            return None, None, None, None, None, None, None, None, None
+
+        needs_input_grad, needs_initial_grad = ctx.needs_input_grad[:2]
+        if not needs_input_grad and not needs_initial_grad:
+            return None, None, None, None, None, None, None, None, None
+
+        from myelin.triton import surrogate_lif_backward, surrogate_lif_forward
+
+        inputs, initial_membrane = ctx.saved_tensors
+        params = LIFParams(tau_mem=ctx.tau_mem, threshold=ctx.threshold, reset=ctx.reset)
+        # Recompute the pre-reset trace instead of having stored it.
+        with torch.no_grad():
+            _state, spikes, pre_reset_membranes = surrogate_lif_forward(
+                inputs,
+                LIFState(membrane=initial_membrane),
+                params,
+                block_size=ctx.block_size,
+            )
+        grad_inputs, grad_initial = surrogate_lif_backward(
+            pre_reset_membranes,
+            spikes,
+            grad_final_membrane,
+            grad_spikes,
+            params,
+            surrogate=ctx.surrogate,
+            surrogate_slope=ctx.surrogate_slope,
+            block_size=ctx.block_size,
+        )
+        if not needs_input_grad:
+            grad_inputs = None
+        if not needs_initial_grad:
+            grad_initial = None
+        return grad_inputs, grad_initial, None, None, None, None, None, None, None
+
+
+def triton_surrogate_lif_recompute_function(
+    inputs: torch.Tensor,
+    initial_state: LIFState,
+    params: LIFParams,
+    *,
+    surrogate: SurrogateName = "atan",
+    surrogate_slope: float = 10.0,
+    hard_forward: bool = True,
+    block_size: int = 256,
+) -> tuple[LIFState, torch.Tensor]:
+    """Hard-forward surrogate LIF with a low-memory recompute backward."""
+
+    if not hard_forward:
+        raise ValueError("Triton surrogate LIF currently supports only hard_forward=True")
+
+    final_membrane, spikes = TritonSurrogateLIFRecomputeFunction.apply(
+        inputs,
+        initial_state.membrane,
+        params.tau_mem,
+        params.threshold,
+        params.reset,
+        surrogate,
+        surrogate_slope,
+        block_size,
+    )
+    return LIFState(membrane=final_membrane), spikes
+
+
 class GeneratedTritonSurrogateLIFFunction(torch.autograd.Function):
     """Triton surrogate LIF using generated surrogate backward code."""
 
