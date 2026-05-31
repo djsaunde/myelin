@@ -60,6 +60,22 @@ the loop it always completes, and it is a one-time, cacheable cost.
   produces NaN/exploding gradients and parallelizes the whole scan tree into
   ~34 GB at `T=1024`. Unusable.
 
+## End-to-end: the next bottleneck is `SpikingSequenceLIF`
+
+Fixing WKV does **not** by itself make the whole SpikeGPT model compile fast.
+`SpikeGPTBlock.forward` also applies two `SpikingSequenceLIF` activations, each of
+which is its own `for step in range(T)` loop that `torch.compile` unrolls. An
+end-to-end `spikegpt_compile_probe` (context 32, 2 layers, 128 embedding, RTX
+5090, `fullgraph=True`) is correct (compiled loss matches eager) and fast once
+warm (compiled steady 4.6 ms), but the cold compile still takes ~57 s at `T=32`
+— now dominated by the four unrolled LIF loops, not WKV.
+
+So the WKV is no longer the compile bottleneck, but the LIF activations are. The
+same treatment applies: `SpikingSequenceLIF` is a linear recurrence with a hard
+reset (a per-step multiplier in `{decay, 0}`), so it can be made loop-free via
+`associative_scan` or routed through `myelin`'s existing fused-time LIF kernels.
+That is the next step toward a flat whole-model compile.
+
 ## torch 2.13 requirement
 
 `associative_scan` autograd is only correct in torch 2.13+, which at time of
