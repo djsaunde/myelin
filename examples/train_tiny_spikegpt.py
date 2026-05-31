@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from pathlib import Path
 
@@ -81,6 +82,17 @@ REGIONAL_LITE_COMPILE_OPTIONS: dict[str, object] = {
 }
 
 
+def cosine_lr(
+    step: int, total_steps: int, lr_init: float, lr_final: float, warmup_steps: int
+) -> float:
+    """Linear warmup then cosine decay from lr_init to lr_final over total_steps."""
+    if warmup_steps > 0 and step < warmup_steps:
+        return lr_init * (step + 1) / warmup_steps
+    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+    progress = min(max(progress, 0.0), 1.0)
+    return lr_final + 0.5 * (lr_init - lr_final) * (1.0 + math.cos(math.pi * progress))
+
+
 def mark_compiled_invocation_boundary(enabled: bool) -> None:
     if not enabled:
         return
@@ -120,7 +132,23 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument(
+        "--lr-final",
+        type=float,
+        default=None,
+        help="final LR for cosine decay over the run; unset keeps a fixed LR",
+    )
+    parser.add_argument("--warmup-steps", type=int, default=0, help="linear LR warmup steps")
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-eps", type=float, default=1e-8)
     parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="save --checkpoint-out every N steps (0 = only at the end)",
+    )
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument(
         "--lif-threshold",
@@ -285,7 +313,13 @@ def main() -> None:
         if args.compile in ("regional", "regional-lite")
         else compile_training_model(raw_model, compile_model)
     )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.lr,
+        betas=(args.adam_beta1, args.adam_beta2),
+        eps=args.adam_eps,
+        weight_decay=args.weight_decay,
+    )
     optimizer_loaded = False
     if checkpoint is not None and checkpoint.optimizer_state_dict is not None:
         optimizer.load_state_dict(checkpoint.optimizer_state_dict)
@@ -328,6 +362,32 @@ def main() -> None:
         },
     )
     step_times: list[float] = []
+
+    def save_run_checkpoint(steps_completed: int) -> None:
+        if args.checkpoint_out is None:
+            return
+        args.checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
+        save_spike_language_checkpoint(
+            args.checkpoint_out,
+            raw_model,
+            vocabulary,
+            metadata={
+                "vocab": actual_vocab,
+                "preset": args.preset,
+                "model_type": config.model_type,
+                "steps": args.steps,
+                "previous_steps": steps_completed,
+                "total_steps": total_steps,
+                "batch": args.batch,
+                "lr": args.lr,
+                "weight_decay": args.weight_decay,
+                "grad_clip": args.grad_clip,
+                "seed": args.seed,
+                "train_tokens": train_tokens.numel(),
+                "val_tokens": val_tokens.numel(),
+            },
+            optimizer=optimizer,
+        )
 
     print(
         "| Step | Train Loss | Val Loss | Val BPC | Val PPL | "
@@ -378,6 +438,12 @@ def main() -> None:
 
         for step in range(1, args.steps + 1):
             global_step = previous_steps + step
+            if args.lr_final is not None:
+                lr_now = cosine_lr(
+                    global_step - 1, total_steps, args.lr, args.lr_final, args.warmup_steps
+                )
+                for group in optimizer.param_groups:
+                    group["lr"] = lr_now
             inputs, targets = sample_token_batch(
                 train_tokens,
                 batch_size=args.batch,
@@ -429,6 +495,7 @@ def main() -> None:
                     "train/embedding_spike_rate": rates["embedding"],
                     "train/mean_block_spike_rate": mean_block_rate,
                     "train/step_ms": step_seconds * 1000,
+                    "train/lr": optimizer.param_groups[0]["lr"],
                 }
                 if grad_norm is not None:
                     wandb_metrics["train/grad_norm"] = grad_norm
@@ -441,34 +508,17 @@ def main() -> None:
                         }
                     )
                 log_wandb(wandb_run, wandb_metrics, step=global_step)
+
+            if args.checkpoint_every and step % args.checkpoint_every == 0:
+                save_run_checkpoint(global_step)
+                print(f"checkpoint={args.checkpoint_out} (step {global_step})", flush=True)
     finally:
         finish_wandb(wandb_run)
 
     print()
     print_step_time_summary(step_times)
+    save_run_checkpoint(total_steps)
     if args.checkpoint_out is not None:
-        args.checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
-        save_spike_language_checkpoint(
-            args.checkpoint_out,
-            raw_model,
-            vocabulary,
-            metadata={
-                "vocab": actual_vocab,
-                "preset": args.preset,
-                "model_type": config.model_type,
-                "steps": args.steps,
-                "previous_steps": previous_steps,
-                "total_steps": total_steps,
-                "batch": args.batch,
-                "lr": args.lr,
-                "weight_decay": args.weight_decay,
-                "grad_clip": args.grad_clip,
-                "seed": args.seed,
-                "train_tokens": train_tokens.numel(),
-                "val_tokens": val_tokens.numel(),
-            },
-            optimizer=optimizer,
-        )
         print(f"checkpoint={args.checkpoint_out}", flush=True)
 
     prompt = args.sample_prompt
