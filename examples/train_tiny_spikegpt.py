@@ -176,7 +176,19 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     configure_matmul_precision(args.matmul_precision)
-    text = args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
+    # enwik8 and other byte-level corpora contain raw bytes that are not valid
+    # UTF-8, so read them as bytes when using the byte vocabulary; otherwise read
+    # UTF-8 text.
+    byte_file_mode = args.text_file is not None and args.vocab == "byte"
+    if byte_file_mode:
+        raw_bytes = args.text_file.read_bytes()
+        if not raw_bytes:
+            raise ValueError("text file is empty")
+        text = ""
+    else:
+        text = (
+            args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
+        )
     checkpoint = (
         load_spike_language_checkpoint(args.checkpoint_in, map_location=args.device)
         if args.checkpoint_in is not None
@@ -184,9 +196,7 @@ def main() -> None:
     )
     if checkpoint is None:
         vocabulary = (
-            CharacterVocabulary.from_text(text)
-            if args.vocab == "char"
-            else ByteVocabulary.from_text(text)
+            CharacterVocabulary.from_text(text) if args.vocab == "char" else ByteVocabulary()
         )
         config = (
             SpikeGPTConfig(
@@ -218,7 +228,11 @@ def main() -> None:
         config = checkpoint.model.config
         raw_model = checkpoint.model.to(device=args.device)
         checkpoint_metadata = checkpoint.metadata
-    tokens = vocabulary.encode(text)
+    tokens = (
+        torch.frombuffer(bytearray(raw_bytes), dtype=torch.uint8).to(torch.long)
+        if byte_file_mode
+        else vocabulary.encode(text)
+    )
     train_tokens, val_tokens = split_token_sequence(
         tokens,
         validation_fraction=args.val_fraction,
