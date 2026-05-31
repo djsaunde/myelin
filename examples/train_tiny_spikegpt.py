@@ -125,10 +125,10 @@ def main() -> None:
     parser.add_argument(
         "--lif-threshold",
         type=float,
-        default=0.0,
+        default=1.0,
         help=(
-            "LIF threshold for the tiny demo; SpikeGPTConfig defaults to 1.0, "
-            "which is better suited to longer contexts and larger activations"
+            "LIF firing threshold; 1.0 matches the SpikeGPT/SpikingJelly reference "
+            "(v_threshold=1.0). Lower values (e.g. 0.0) fire denser spikes."
         ),
     )
     parser.add_argument("--log-every", type=int, default=10)

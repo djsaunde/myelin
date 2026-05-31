@@ -607,6 +607,12 @@ class SpikingSequenceLIF(nn.Module):
                 f"got {state.membrane.shape} and {inputs.shape}"
             )
             raise ValueError(msg)
+        # Membrane update uses myelin's standard LIF convention `v = decay*v + x`
+        # (decay = 1 - 1/tau), consistent with `neurons.py` and the Triton kernels.
+        # The SpikeGPT/SpikingJelly reference instead uses the Euler form
+        # `v = decay*v + (1-decay)*x` (decay_input=True); the two differ only by a
+        # constant 1/tau gain on the input, which is fully absorbed by the learned
+        # Linear feeding this activation, so a trained model is equivalent either way.
         membrane = state.membrane * self.decay + inputs
         centered = self.surrogate_slope * (membrane - self.threshold)
         if self.hard_forward:
