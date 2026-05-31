@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import math
 import time
 from pathlib import Path
@@ -159,7 +160,7 @@ def main() -> None:
             "(v_threshold=1.0). Lower values (e.g. 0.0) fire denser spikes."
         ),
     )
-    parser.add_argument("--log-every", type=int, default=10)
+    parser.add_argument("--log-every", type=int, default=50)
     parser.add_argument("--eval-every", type=int, default=25)
     parser.add_argument("--eval-batches", type=int, default=8)
     parser.add_argument(
@@ -184,6 +185,14 @@ def main() -> None:
         type=Path,
         help="optional path for saving the trained SpikeGPT model checkpoint",
     )
+    parser.add_argument(
+        "--best-checkpoint-out",
+        type=Path,
+        help=(
+            "optional path to save the best-val-BPC checkpoint seen during training "
+            "(keeps the best generalizing point, not just the latest)"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--dense-embedding",
@@ -198,7 +207,18 @@ def main() -> None:
     )
     add_compile_policy_arg(parser, extra_policies=("regional", "regional-lite"))
     add_grad_clip_arg(parser)
-    add_matmul_precision_arg(parser)
+    add_matmul_precision_arg(parser, default="high")
+    parser.add_argument(
+        "--amp",
+        choices=("off", "bf16"),
+        default="bf16",
+        help=(
+            "autocast mixed precision for the training forward pass (default bf16); ~1.6x "
+            "faster and ~25%% less memory under torch.compile on CUDA, and a no-op on CPU. "
+            "The WKV recurrence and LIF membrane stay in float32 internally regardless. "
+            "Use 'off' for a pure-float32 run."
+        ),
+    )
     add_wandb_args(parser)
     args = parser.parse_args()
 
@@ -268,9 +288,15 @@ def main() -> None:
     )
     actual_vocab = vocabulary_name(vocabulary)
     actual_activation_checkpointing = raw_model.gradient_checkpointing
-    previous_steps = metadata_nonnegative_int(
-        checkpoint_metadata, "total_steps"
-    ) or metadata_nonnegative_int(checkpoint_metadata, "steps")
+    # "previous_steps" records the global steps actually completed (set on every
+    # periodic and final save), so it is the correct resume point for both partial
+    # and finished runs. Fall back to total_steps/steps for older checkpoints that
+    # predate the field.
+    previous_steps = (
+        metadata_nonnegative_int(checkpoint_metadata, "previous_steps")
+        or metadata_nonnegative_int(checkpoint_metadata, "total_steps")
+        or metadata_nonnegative_int(checkpoint_metadata, "steps")
+    )
     total_steps = previous_steps + args.steps
     compile_model = (
         True
@@ -287,6 +313,7 @@ def main() -> None:
         f"weight_decay:{args.weight_decay},dropout:{config.dropout},"
         f"lif_threshold:{config.lif_threshold},"
         f"grad_clip:{args.grad_clip},"
+        f"amp:{args.amp},matmul_precision:{args.matmul_precision},"
         f"compile_warmup:{args.compile_warmup},"
         f"spike_embedding:{config.spike_embedding},"
         f"activation_checkpointing:{actual_activation_checkpointing},"
@@ -362,13 +389,15 @@ def main() -> None:
         },
     )
     step_times: list[float] = []
+    best_val_bpc = float("inf")
 
-    def save_run_checkpoint(steps_completed: int) -> None:
-        if args.checkpoint_out is None:
+    def save_run_checkpoint(steps_completed: int, path: Path | None = None) -> None:
+        target = path if path is not None else args.checkpoint_out
+        if target is None:
             return
-        args.checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         save_spike_language_checkpoint(
-            args.checkpoint_out,
+            target,
             raw_model,
             vocabulary,
             metadata={
@@ -399,6 +428,12 @@ def main() -> None:
     try:
         model.train()
         torch_device = torch.device(args.device)
+
+        def amp_context() -> contextlib.AbstractContextManager:
+            if args.amp == "bf16" and torch_device.type == "cuda":
+                return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            return contextlib.nullcontext()
+
         if compile_model and args.compile_warmup:
             warmup_inputs, warmup_targets = sample_token_batch(
                 train_tokens,
@@ -411,7 +446,8 @@ def main() -> None:
             start = time.perf_counter()
             optimizer.zero_grad(set_to_none=True)
             mark_compiled_invocation_boundary(compile_model)
-            warmup_loss, _warmup_logits = model(warmup_inputs, warmup_targets)
+            with amp_context():
+                warmup_loss, _warmup_logits = model(warmup_inputs, warmup_targets)
             warmup_loss.backward()
             warmup_grad_norm = clip_gradients(model, args.grad_clip)
             optimizer.step()
@@ -455,7 +491,8 @@ def main() -> None:
             start = time.perf_counter()
             optimizer.zero_grad(set_to_none=True)
             mark_compiled_invocation_boundary(compile_model)
-            loss, _logits = model(inputs, targets)
+            with amp_context():
+                loss, _logits = model(inputs, targets)
             loss.backward()
             grad_norm = clip_gradients(model, args.grad_clip)
             optimizer.step()
@@ -465,12 +502,17 @@ def main() -> None:
             step_times.append(step_seconds)
 
             if step == 1 or step % args.log_every == 0 or step == args.steps:
-                mark_compiled_invocation_boundary(compile_model)
-                rates = raw_model.spike_rates(inputs)
-                block_rates = [value for key, value in rates.items() if key != "embedding"]
-                mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
+                # Cheap, frequent logging: train loss, lr, step time, grad norm are
+                # already computed above. The spike-rate forward and the val eval are
+                # expensive, so they run only on the coarser eval cadence.
                 eval_metrics = None
+                rates = None
+                mean_block_rate = None
                 if step == 1 or step % args.eval_every == 0 or step == args.steps:
+                    mark_compiled_invocation_boundary(compile_model)
+                    rates = raw_model.spike_rates(inputs)
+                    block_rates = [value for key, value in rates.items() if key != "embedding"]
+                    mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
                     mark_compiled_invocation_boundary(compile_model)
                     eval_metrics = evaluate_language_model(
                         raw_model,
@@ -480,23 +522,26 @@ def main() -> None:
                         device=args.device,
                         batches=args.eval_batches,
                     )
+                emb_rate_str = "" if rates is None else f"{rates['embedding']:.4f}"
+                block_rate_str = "" if mean_block_rate is None else f"{mean_block_rate:.4f}"
                 print(
                     f"| {global_step} | {float(loss.detach()):.6f} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.loss:.6f}'} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.bits_per_character:.4f}'} | "
                     f"{'' if eval_metrics is None else f'{eval_metrics.perplexity:.4f}'} | "
-                    f"{rates['embedding']:.4f} | {mean_block_rate:.4f} | "
+                    f"{emb_rate_str} | {block_rate_str} | "
                     f"{'' if grad_norm is None else f'{grad_norm:.4f}'} | "
                     f"{step_seconds * 1000:.3f} |",
                     flush=True,
                 )
                 wandb_metrics = {
                     "train/loss": float(loss.detach()),
-                    "train/embedding_spike_rate": rates["embedding"],
-                    "train/mean_block_spike_rate": mean_block_rate,
                     "train/step_ms": step_seconds * 1000,
                     "train/lr": optimizer.param_groups[0]["lr"],
                 }
+                if rates is not None:
+                    wandb_metrics["train/embedding_spike_rate"] = rates["embedding"]
+                    wandb_metrics["train/mean_block_spike_rate"] = mean_block_rate
                 if grad_norm is not None:
                     wandb_metrics["train/grad_norm"] = grad_norm
                 if eval_metrics is not None:
@@ -508,6 +553,19 @@ def main() -> None:
                         }
                     )
                 log_wandb(wandb_run, wandb_metrics, step=global_step)
+
+                if (
+                    args.best_checkpoint_out is not None
+                    and eval_metrics is not None
+                    and eval_metrics.bits_per_character < best_val_bpc
+                ):
+                    best_val_bpc = eval_metrics.bits_per_character
+                    save_run_checkpoint(global_step, path=args.best_checkpoint_out)
+                    print(
+                        f"best_checkpoint={args.best_checkpoint_out} "
+                        f"(step {global_step}, val BPC {best_val_bpc:.4f})",
+                        flush=True,
+                    )
 
             if args.checkpoint_every and step % args.checkpoint_every == 0:
                 save_run_checkpoint(global_step)

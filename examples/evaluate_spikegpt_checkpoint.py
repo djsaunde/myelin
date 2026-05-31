@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from myelin import (
+    ByteVocabulary,
     evaluate_language_model,
     evaluate_language_model_strided,
     load_spike_language_checkpoint,
@@ -66,11 +67,17 @@ def main() -> None:
     if checkpoint.metadata:
         print(f"checkpoint_metadata={checkpoint.metadata}", flush=True)
 
-    eval_text = (
-        args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
-    )
-    if eval_text:
-        eval_tokens = vocabulary.encode(eval_text)
+    if args.text_file is not None and isinstance(vocabulary, ByteVocabulary):
+        # Byte-level corpus (e.g. enwik8): read raw bytes, not UTF-8 text.
+        eval_tokens = torch.frombuffer(
+            bytearray(args.text_file.read_bytes()), dtype=torch.uint8
+        ).to(torch.long)
+    else:
+        eval_text = (
+            args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
+        )
+        eval_tokens = vocabulary.encode(eval_text) if eval_text else None
+    if eval_tokens is not None:
         try:
             if args.random_eval:
                 metrics = evaluate_language_model(

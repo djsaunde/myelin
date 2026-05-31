@@ -117,11 +117,11 @@ def add_wandb_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--wandb-run-name")
 
 
-def add_matmul_precision_arg(parser: argparse.ArgumentParser) -> None:
+def add_matmul_precision_arg(parser: argparse.ArgumentParser, *, default: str = "highest") -> None:
     parser.add_argument(
         "--matmul-precision",
         choices=MATMUL_PRECISIONS,
-        default="highest",
+        default=default,
         help="float32 matmul precision for CUDA examples; use high to enable TF32 where available",
     )
 

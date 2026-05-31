@@ -382,13 +382,20 @@ def weighted_key_value(
 
     _validate_wkv_inputs(key, value, time_decay, time_first)
     batch, timesteps, channels = key.shape
-    dtype = key.dtype
+    # The log-space recurrence (exp of accumulated decay) is numerically
+    # sensitive, so it always runs in float32 — matching the reference SpikeGPT
+    # WKV CUDA kernel, which upcasts w/u/k/v to float32 internally regardless of
+    # the model's autocast dtype. The result is cast back to the caller's dtype
+    # so the surrounding bf16 matmuls are unaffected. No-op in a pure-fp32 run.
+    orig_dtype = key.dtype
+    # Upcast only reduced-precision floats (bf16/fp16); preserve float32/float64.
+    dtype = torch.float32 if orig_dtype in (torch.float16, torch.bfloat16) else orig_dtype
     device = key.device
     decay = -torch.exp(time_decay.to(device=device, dtype=dtype))  # [C], < 0
     first = time_first.to(device=device, dtype=dtype)
 
-    keys = key.movedim(1, 0).contiguous()  # [T, B, C]
-    values = value.movedim(1, 0).contiguous()
+    keys = key.movedim(1, 0).contiguous().to(dtype)  # [T, B, C]
+    values = value.movedim(1, 0).contiguous().to(dtype)
     # Per-token element: acc_decay=decay (len 1), log_scale=key (true num=exp(k)*v), num=v, den=1.
     acc_decay = decay[None, None, :].expand(timesteps, batch, channels).contiguous()
     ones = torch.ones_like(keys)
@@ -424,7 +431,7 @@ def weighted_key_value(
     weight_prefix = torch.exp(scale_ex - merged)
     weight_bonus = torch.exp(bonus - merged)
     out = (weight_prefix * num_ex + weight_bonus * values) / (weight_prefix * den_ex + weight_bonus)
-    return out.movedim(0, 1)
+    return out.movedim(0, 1).to(orig_dtype)
 
 
 def split_token_sequence(
@@ -660,6 +667,13 @@ class SpikingSequenceLIF(nn.Module):
             msg = f"inputs must have shape [B, T, C]; got {inputs.shape}"
             raise ValueError(msg)
 
+        # The membrane recurrence is numerically sensitive and the fused Triton
+        # kernel keeps a float32 carry, so reduced-precision (bf16/fp16) inputs are
+        # upcast to float32 here and the spikes cast back. No-op in a pure-fp32 run.
+        orig_dtype = inputs.dtype
+        if orig_dtype in (torch.float16, torch.bfloat16):
+            inputs = inputs.float()
+
         # Fused-time Triton kernel on CUDA: the time loop lives in the kernel, so it
         # needs no torch.compile and does not unroll. Falls back to the loop below.
         surrogate_name = self._fused_surrogate_name()
@@ -680,7 +694,7 @@ class SpikingSequenceLIF(nn.Module):
                 surrogate_slope=self.surrogate_slope,
                 hard_forward=True,
             )
-            return spikes.movedim(0, 1)
+            return spikes.movedim(0, 1).to(orig_dtype)
 
         state = self.initial_state(
             batch_size=inputs.shape[0],
@@ -692,7 +706,7 @@ class SpikingSequenceLIF(nn.Module):
         for step in range(inputs.shape[1]):
             spike, state = self.step(inputs[:, step], state)
             spikes_list.append(spike)
-        return torch.stack(spikes_list, dim=1)
+        return torch.stack(spikes_list, dim=1).to(orig_dtype)
 
 
 class SpikeTimeMix(nn.Module):
@@ -1297,8 +1311,13 @@ def load_spike_language_checkpoint(
     raw_state_dict = payload.get("state_dict")
     if not isinstance(raw_state_dict, Mapping):
         raise ValueError("checkpoint state_dict must be a mapping")
+    # Checkpoints saved from a regionally-compiled model carry torch.compile's
+    # `_orig_mod.` wrapper segment on each compiled submodule's keys
+    # (e.g. `blocks.0._orig_mod.att.key.weight`). Strip it so the state_dict
+    # loads into a plain, uncompiled SpikeLanguageModel.
+    state_dict = {key.replace("._orig_mod.", "."): value for key, value in raw_state_dict.items()}
     model = SpikeLanguageModel(config)
-    model.load_state_dict(cast(Mapping[str, Any], raw_state_dict))
+    model.load_state_dict(cast(Mapping[str, Any], state_dict))
     metadata = dict(_require_mapping(payload.get("metadata", {}), "metadata"))
     raw_optimizer_state = payload.get("optimizer_state_dict")
     optimizer_state_dict = (
