@@ -3091,3 +3091,31 @@ def test_triton_surrogate_lif_recompute_matches_store_all() -> None:
     assert gx_store is not None and gx_rec is not None
     assert torch.allclose(gx_store, gx_rec, atol=1e-5, rtol=1e-4)
     assert torch.allclose(gv_store, gv_rec, atol=1e-5, rtol=1e-4)
+
+
+def test_spiking_sequence_lif_fused_dispatch_matches_kernel() -> None:
+    """SpikingSequenceLIF's fused path must route to the Triton kernel correctly.
+
+    Validates the dispatch wiring (time-major movedim + param/surrogate mapping)
+    against a direct kernel call. Kernel-vs-loop correctness is covered separately;
+    bit-comparing the fused path to the loop is fragile because the hard reset
+    cascades fp rounding differences at threshold crossings.
+    """
+    from myelin.kernels import surrogate_lif_forward
+    from myelin.language import SpikingSequenceLIF
+
+    torch.manual_seed(3)
+    x = torch.randn((4, 20, 16), device="cuda")  # [B, T, C]
+    params = LIFParams(tau_mem=2.0, threshold=1.0, reset=0.0)
+    currents = x.movedim(1, 0).contiguous()
+    initial = LIFState(membrane=currents.new_zeros(currents.shape[1:]))
+
+    for recompute in (False, True):
+        lif = SpikingSequenceLIF(
+            tau=2.0, threshold=1.0, surrogate_slope=2.0, recompute=recompute
+        ).cuda()
+        spikes = lif(x)
+        _, ref = surrogate_lif_forward(
+            currents, initial, params, surrogate="atan", surrogate_slope=2.0, backend="triton"
+        )
+        assert torch.equal(spikes, ref.movedim(0, 1))

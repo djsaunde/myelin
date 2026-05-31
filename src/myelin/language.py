@@ -20,7 +20,26 @@ from torch._higher_order_ops.associative_scan import associative_scan
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-from myelin.surrogates import SurrogateFn, atan_surrogate, hard_surrogate_spike
+from myelin._optional import has_triton
+from myelin.autograd import (
+    triton_surrogate_lif_function,
+    triton_surrogate_lif_recompute_function,
+)
+from myelin.neurons import LIFParams, LIFState
+from myelin.surrogates import (
+    SURROGATE_NAMES,
+    SurrogateFn,
+    SurrogateName,
+    atan_surrogate,
+    hard_surrogate_spike,
+    surrogate_from_name,
+)
+
+# Reverse lookup (built-in surrogate callable -> name) so SpikingSequenceLIF can
+# dispatch to the fused Triton kernels, which take a surrogate name.
+_SURROGATE_NAME_BY_FN: dict[SurrogateFn, SurrogateName] = {
+    surrogate_from_name(name): name for name in SURROGATE_NAMES
+}
 
 SpikeGPTModelType = Literal["rwkv", "rwkv-ffn-pre"]
 SpikeGPTPreset = Literal["micro", "tiny", "small", "base"]
@@ -566,6 +585,8 @@ class SpikingSequenceLIF(nn.Module):
         surrogate: SurrogateFn = atan_surrogate,
         surrogate_slope: float = 2.0,
         hard_forward: bool = True,
+        fused: bool = True,
+        recompute: bool = False,
     ) -> None:
         super().__init__()
         if tau <= 0.0:
@@ -576,6 +597,12 @@ class SpikingSequenceLIF(nn.Module):
         self.surrogate = surrogate
         self.surrogate_slope = surrogate_slope
         self.hard_forward = hard_forward
+        # When `fused`, use the Triton fused-time kernel on CUDA (store-all backward
+        # by default; `recompute` trades a backward recompute for lower peak memory).
+        # Falls back to the per-step loop on CPU / without Triton / for custom
+        # surrogates. The loop stays the correctness oracle.
+        self.fused = fused
+        self.recompute = recompute
 
     @property
     def decay(self) -> float:
@@ -622,10 +649,38 @@ class SpikingSequenceLIF(nn.Module):
         membrane = membrane * (1.0 - spike) + self.reset * spike
         return spike, SpikingSequenceLIFState(membrane=membrane)
 
+    def _fused_surrogate_name(self) -> SurrogateName | None:
+        """Surrogate name for the Triton kernel, or None if the fused path can't apply."""
+        if not (self.fused and self.hard_forward):
+            return None
+        return _SURROGATE_NAME_BY_FN.get(self.surrogate)
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         if inputs.ndim != 3:
             msg = f"inputs must have shape [B, T, C]; got {inputs.shape}"
             raise ValueError(msg)
+
+        # Fused-time Triton kernel on CUDA: the time loop lives in the kernel, so it
+        # needs no torch.compile and does not unroll. Falls back to the loop below.
+        surrogate_name = self._fused_surrogate_name()
+        if surrogate_name is not None and inputs.is_cuda and has_triton():
+            currents = inputs.movedim(1, 0).contiguous()  # [T, B, C]
+            params = LIFParams(tau_mem=self.tau, threshold=self.threshold, reset=self.reset)
+            initial = LIFState(membrane=currents.new_zeros(currents.shape[1:]))
+            run = (
+                triton_surrogate_lif_recompute_function
+                if self.recompute
+                else triton_surrogate_lif_function
+            )
+            _, spikes = run(
+                currents,
+                initial,
+                params,
+                surrogate=surrogate_name,
+                surrogate_slope=self.surrogate_slope,
+                hard_forward=True,
+            )
+            return spikes.movedim(0, 1)
 
         state = self.initial_state(
             batch_size=inputs.shape[0],
@@ -633,11 +688,11 @@ class SpikingSequenceLIF(nn.Module):
             device=inputs.device,
             dtype=inputs.dtype,
         )
-        spikes: list[torch.Tensor] = []
+        spikes_list: list[torch.Tensor] = []
         for step in range(inputs.shape[1]):
             spike, state = self.step(inputs[:, step], state)
-            spikes.append(spike)
-        return torch.stack(spikes, dim=1)
+            spikes_list.append(spike)
+        return torch.stack(spikes_list, dim=1)
 
 
 class SpikeTimeMix(nn.Module):
