@@ -70,11 +70,41 @@ end-to-end `spikegpt_compile_probe` (context 32, 2 layers, 128 embedding, RTX
 warm (compiled steady 4.6 ms), but the cold compile still takes ~57 s at `T=32`
 — now dominated by the four unrolled LIF loops, not WKV.
 
-So the WKV is no longer the compile bottleneck, but the LIF activations are. The
-same treatment applies: `SpikingSequenceLIF` is a linear recurrence with a hard
-reset (a per-step multiplier in `{decay, 0}`), so it can be made loop-free via
-`associative_scan` or routed through `myelin`'s existing fused-time LIF kernels.
-That is the next step toward a flat whole-model compile.
+So the WKV is no longer the compile bottleneck, but the LIF activations are.
+Unlike WKV, however, LIF does **not** get the same treatment: the hard reset
+folds in as a per-step multiplier `decay * (1 - spike_{t-1}) ∈ {decay, 0}` that
+depends on whether the membrane crossed threshold, i.e. the recurrence is
+**nonlinear / state-dependent**, not a constant-coefficient linear recurrence.
+That breaks the associativity `associative_scan` needs — you cannot merge two
+segments without first knowing whether the earlier one spiked. So LIF is
+genuinely sequential.
+
+Benchmarking the alternatives (loop vs the fused Triton surrogate kernel vs
+checkpointed recompute), the **compiled loop wins**: Inductor shortens buffer
+lifetimes so its peak memory stays low, while the Triton surrogate kernel stores
+the full `[T, B, C]` pre-reset trace for its fused backward and so uses
+materially more memory; recompute trades that memory back for extra FLOPs but
+does not beat the loop. So the loop is the right LIF kernel — its only liability
+is compile latency.
+
+The natural loop-free tool for a sequential nonlinear recurrence is the **`scan`
+higher-order op** (one un-unrolled graph node: flat compile, low memory, the
+reset handled inside the per-step combine). Its forward already works, but its
+**backward is broken** in current torch (it drops the carry gradient — the same
+blocker WKV's `scan` hit; `associative_scan` got a correct autograd impl first).
+So `scan`-LIF is the queued win: adopt it once PyTorch ships correct `scan`
+autograd. Until then the loop is retained and its compile cost is made one-time
+via persistent compilation caching (Inductor `fx_graph_cache` + Mega-Cache):
+
+| `spikegpt_compile_probe` (ctx 32, 2 layers, RTX 5090) | compiled first step | steady |
+|---|--:|--:|
+| cold (empty cache) | 58.7 s | 4.36 ms |
+| warm (shared cache dir) | 6.5 s | 4.34 ms |
+
+So a warm cache cuts the model's cold compile ~9x (58.7 s -> 6.5 s) with identical
+steady runtime and loss. The residual ~6.5 s is Dynamo re-tracing the unrolled
+graph (Inductor codegen is cached), so for a fixed-shape training run the heavy
+LIF compile is paid once, not every run.
 
 ## torch 2.13 requirement
 
