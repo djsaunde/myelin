@@ -140,6 +140,7 @@ from myelin.language import (
     spikegpt_config_to_dict,
     split_token_sequence,
     weighted_key_value,
+    weighted_key_value_loop,
 )
 from myelin.losses import SpikeRateLoss, spike_rate_loss
 from myelin.modules import (
@@ -379,6 +380,7 @@ __all__ = [
     "validate_neuron_ir",
     "validate_surrogate_derivative_ir",
     "weighted_key_value",
+    "weighted_key_value_loop",
     "write_dense_lif_placement_plan",
     "write_hardware_export",
     "write_hardware_export_bundle",

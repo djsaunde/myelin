@@ -16,6 +16,7 @@ from typing import Any, Literal, TypeAlias, cast
 
 import torch
 from torch import nn
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
@@ -263,19 +264,12 @@ def _sample_next_token(
     return torch.multinomial(probabilities, num_samples=1)
 
 
-def weighted_key_value(
+def _validate_wkv_inputs(
     key: torch.Tensor,
     value: torch.Tensor,
     time_decay: torch.Tensor,
     time_first: torch.Tensor,
-) -> torch.Tensor:
-    """RWKV weighted key-value recurrence.
-
-    ``key`` and ``value`` are batch-major tensors with shape ``[B, T, C]``.
-    This reference implementation matches the scalar recurrence used by the
-    SpikeGPT/RWKV CUDA kernel while remaining readable and autograd-friendly.
-    """
-
+) -> None:
     if key.shape != value.shape:
         msg = f"key and value must have the same shape; got {key.shape} and {value.shape}"
         raise ValueError(msg)
@@ -289,6 +283,23 @@ def weighted_key_value(
         msg = f"time_first must have shape [{key.shape[-1]}]; got {time_first.shape}"
         raise ValueError(msg)
 
+
+def weighted_key_value_loop(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    time_decay: torch.Tensor,
+    time_first: torch.Tensor,
+) -> torch.Tensor:
+    """Sequential RWKV weighted key-value recurrence (correctness oracle).
+
+    ``key`` and ``value`` are batch-major tensors with shape ``[B, T, C]``. This
+    readable per-timestep loop is the reference ``weighted_key_value`` is
+    validated against. It is correct but ``torch.compile`` unrolls the time loop,
+    so its compile cost grows (super-linearly) with ``T``; prefer the default
+    associative-scan ``weighted_key_value`` for compiled training.
+    """
+
+    _validate_wkv_inputs(key, value, time_decay, time_first)
     batch, timesteps, channels = key.shape
     dtype = key.dtype
     device = key.device
@@ -324,6 +335,77 @@ def weighted_key_value(
         log_scale = next_log_scale
 
     return torch.stack(outputs, dim=1)
+
+
+def weighted_key_value(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    time_decay: torch.Tensor,
+    time_first: torch.Tensor,
+) -> torch.Tensor:
+    """RWKV weighted key-value recurrence via ``associative_scan`` (default).
+
+    Numerically identical to :func:`weighted_key_value_loop`, but expressed as a
+    single ``associative_scan`` higher-order op so ``torch.compile`` sees one
+    graph node instead of unrolling the per-timestep loop. The result: compile
+    time is roughly flat in ``T`` (vs. super-linear for the loop), peak memory is
+    linear in ``T`` (vs. the O(T^2) dense decay-matrix form), and compiled
+    runtime is the best of the variants at long context. Requires torch >= 2.13
+    for correct ``associative_scan`` autograd. See
+    ``benchmarks/results/spikegpt_wkv_compare_5090.md``.
+
+    Each token is summarized as a log-space monoid element
+    ``(acc_decay, log_scale, num, den)`` whose true accumulator is
+    ``exp(log_scale) * num``; the associative ``combine`` decays the earlier
+    segment by the later segment's total decay before merging, with a shared
+    max-exponent for numerical stability.
+    """
+
+    _validate_wkv_inputs(key, value, time_decay, time_first)
+    batch, timesteps, channels = key.shape
+    dtype = key.dtype
+    device = key.device
+    decay = -torch.exp(time_decay.to(device=device, dtype=dtype))  # [C], < 0
+    first = time_first.to(device=device, dtype=dtype)
+
+    keys = key.movedim(1, 0).contiguous()  # [T, B, C]
+    values = value.movedim(1, 0).contiguous()
+    # Per-token element: acc_decay=decay (len 1), log_scale=key (true num=exp(k)*v), num=v, den=1.
+    acc_decay = decay[None, None, :].expand(timesteps, batch, channels).contiguous()
+    ones = torch.ones_like(keys)
+
+    def combine(left, right):
+        decay_l, scale_l, num_l, den_l = left
+        decay_r, scale_r, num_r, den_r = right
+        # The earlier (left) segment decays by exp(decay_r) before merging.
+        merged = torch.maximum(scale_l + decay_r, scale_r)
+        weight_l = torch.exp(scale_l + decay_r - merged)
+        weight_r = torch.exp(scale_r - merged)
+        return (
+            decay_l + decay_r,
+            merged,
+            weight_l * num_l + weight_r * num_r,
+            weight_l * den_l + weight_r * den_r,
+        )
+
+    _, scale_inc, num_inc, den_inc = associative_scan(
+        combine, (acc_decay, keys, values, ones), dim=0, combine_mode="generic"
+    )
+
+    # Exclusive prefix: the accumulator strictly before each token (shift by one).
+    neg_inf = torch.full_like(scale_inc[:1], torch.finfo(dtype).min)
+    zeros = torch.zeros_like(num_inc[:1])
+    scale_ex = torch.cat([neg_inf, scale_inc[:-1]], dim=0)
+    num_ex = torch.cat([zeros, num_inc[:-1]], dim=0)
+    den_ex = torch.cat([zeros, den_inc[:-1]], dim=0)
+
+    # Combine the exclusive prefix with the current-token ``time_first`` bonus.
+    bonus = first[None, None, :] + keys
+    merged = torch.maximum(scale_ex, bonus)
+    weight_prefix = torch.exp(scale_ex - merged)
+    weight_bonus = torch.exp(bonus - merged)
+    out = (weight_prefix * num_ex + weight_bonus * values) / (weight_prefix * den_ex + weight_bonus)
+    return out.movedim(0, 1)
 
 
 def split_token_sequence(

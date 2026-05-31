@@ -6,10 +6,31 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24.4",
-    "torch",
-    "torchvision>=0.27.0",
+    "torch>=2.13.0.dev0",
+    "torchvision",
 ]
 license = "MIT"
+
+# torch 2.13 (for the associative_scan WKV path with working autograd) is only
+# available as a nightly build, which is not published to PyPI. Pull torch and
+# torchvision from the PyTorch nightly CUDA index. NOTE: pinned nightly dev
+# builds are garbage-collected from the index after a few weeks; re-run
+# `uv lock` if a sync fails, and switch this back to PyPI once 2.13 ships stable.
+[tool.uv]
+prerelease = "allow"
+# Only resolve nightly builds that ship a wheel for this platform; otherwise uv
+# may pick the very latest dev date before its x86_64 Linux wheel is published.
+required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-nightly"
+url = "https://download.pytorch.org/whl/nightly/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-nightly" }
+torchvision = { index = "pytorch-nightly" }
+triton = { index = "pytorch-nightly", marker = "sys_platform == 'linux'" }
 
 [project.optional-dependencies]
 cuda = [

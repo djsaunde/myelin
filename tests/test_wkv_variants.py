@@ -6,9 +6,15 @@ import pytest
 import torch
 
 from myelin.benchmarks.spikegpt_wkv_compare import wkv_chunked, wkv_parallel
-from myelin.language import weighted_key_value as wkv_reference
+from myelin.language import weighted_key_value, weighted_key_value_loop
+
+# The sequential loop is the correctness oracle; every loop-free variant
+# (including the default associative-scan `weighted_key_value`) is validated
+# against it.
+wkv_reference = weighted_key_value_loop
 
 VARIANTS = {
+    "associative": weighted_key_value,
     "parallel": wkv_parallel,
     "chunked8": lambda *a: wkv_chunked(*a, chunk_size=8),
     "chunked16": lambda *a: wkv_chunked(*a, chunk_size=16),

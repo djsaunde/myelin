@@ -38,6 +38,12 @@ uv sync --extra dev
 uv run pytest
 ```
 
+`myelin` requires **torch 2.13** (currently a nightly): the SpikeGPT WKV
+recurrence is a single `associative_scan` higher-order op, which only has
+correct autograd in 2.13+. `pyproject.toml` pulls torch/torchvision/triton from
+the PyTorch nightly CUDA index automatically, so `uv sync` just works; see
+`docs/wkv_recurrence.md` for the rationale and benchmarks.
+
 Core deps are `torch`, `torchvision`, and `numpy`. CUDA/Triton, benchmark
 comparison, and W&B tracking are optional extras:
 
