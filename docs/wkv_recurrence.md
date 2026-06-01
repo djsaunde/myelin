@@ -8,11 +8,17 @@ values. This note records why the **CPU / fallback** implementation is an
 
 > **Update:** on CUDA the default is now a hand-written **fused Triton kernel**
 > (`myelin.wkv_triton`, forward + backward ported from the reference RWKV
-> `cuda/wkv_cuda.cu`). It matches the loop oracle's gradients to fp32 (~1e-7) and
-> beats `associative_scan` (6L/512d ctx1024 bf16 regional-compile: ~10% faster
-> step, −24% peak memory), so `SpikeTimeMix.forward` dispatches to it when CUDA +
-> Triton are available and falls back to `associative_scan` otherwise. The rest
-> of this note explains the `associative_scan` fallback.
+> `cuda/wkv_cuda.cu`, registered as the `myelin::wkv_forward` / `wkv_backward`
+> `torch.library` custom ops). It matches the loop oracle's gradients to fp32
+> (~1e-7). Measured vs `associative_scan` (6L/512d ctx1024 bf16 regional-compile):
+> the **full training step is on par** (WKV is only ~36% of the step and Inductor
+> already compiles the scan well); the real wins are a **~8x faster forward** in
+> isolation (helps eval / forward-only paths), **0 graph breaks** (it stays
+> in-graph as an opaque op), and a somewhat **faster cold compile** (~2.0s vs
+> ~3.3s per block). It is also the implementation the reference SpikeGPT uses.
+> `SpikeTimeMix.forward` dispatches to it when CUDA + Triton are available and
+> falls back to `associative_scan` otherwise. The rest of this note explains the
+> `associative_scan` fallback.
 
 ## The problem
 

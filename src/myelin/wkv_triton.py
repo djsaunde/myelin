@@ -12,17 +12,25 @@ owns its rows, so there are no cross-program races).
 
 The recurrence runs in float32 regardless of the model's autocast dtype (matching
 the reference kernel), with results cast back to the caller's dtype.
+
+The forward/backward are registered as ``torch.library`` custom ops
+(``myelin::wkv_forward`` / ``myelin::wkv_backward``) with fake/meta impls and
+registered autograd, so ``torch.compile`` keeps the call in-graph as an opaque
+op (no graph break) rather than trying to trace through the Triton kernels.
 """
 
 from __future__ import annotations
 
 import torch
+from torch import Tensor
 
 from myelin._optional import has_triton
 
 if has_triton():
     import triton
     import triton.language as tl
+
+    _BLOCK = 64
 
     @triton.jit
     def _wkv_forward_kernel(k_ptr, v_ptr, w_ptr, u_ptr, y_ptr, T, C, BLOCK: tl.constexpr):
@@ -134,34 +142,31 @@ if has_triton():
             gq = a * gq - b * y
             o = no
 
+    def _grid(b: int, c: int) -> tuple[int, int]:
+        return (b, triton.cdiv(c, _BLOCK))
 
-def _grid(b: int, c: int, block: int) -> tuple[int, int]:
-    return (b, triton.cdiv(c, block))
-
-
-class _WKVTriton(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, key, value, time_decay, time_first):
-        block = 64
+    @torch.library.custom_op("myelin::wkv_forward", mutates_args=())
+    def _wkv_forward_op(
+        key: Tensor, value: Tensor, time_decay: Tensor, time_first: Tensor
+    ) -> Tensor:
         b, t, c = key.shape
         w = (-torch.exp(time_decay.float())).contiguous()
         u = time_first.float().contiguous()
         k = key.float().contiguous()
         v = value.float().contiguous()
         y = torch.empty_like(k)
-        _wkv_forward_kernel[_grid(b, c, block)](k, v, w, u, y, t, c, BLOCK=block)
-        ctx.save_for_backward(w, u, k, v)
-        ctx.block = block
-        ctx.orig_dtype = key.dtype
-        ctx.td_dtype = time_decay.dtype
-        ctx.tf_dtype = time_first.dtype
+        _wkv_forward_kernel[_grid(b, c)](k, v, w, u, y, t, c, BLOCK=_BLOCK)
         return y.to(key.dtype)
 
-    @staticmethod
-    def backward(ctx, grad_y):
-        w, u, k, v = ctx.saved_tensors
+    @_wkv_forward_op.register_fake
+    def _(key, value, time_decay, time_first):
+        return torch.empty_like(key)
+
+    @torch.library.custom_op("myelin::wkv_backward", mutates_args=())
+    def _wkv_backward_op(
+        grad_y: Tensor, w: Tensor, u: Tensor, k: Tensor, v: Tensor
+    ) -> list[Tensor]:
         b, t, c = k.shape
-        block = ctx.block
         gy = grad_y.float().contiguous()
         ys = torch.empty_like(k)
         zs = torch.empty_like(k)
@@ -170,22 +175,41 @@ class _WKVTriton(torch.autograd.Function):
         gu = torch.empty((b, c), dtype=torch.float32, device=k.device)
         gk = torch.empty_like(k)
         gv = torch.empty_like(k)
-        _wkv_backward_kernel[_grid(b, c, block)](
-            w, u, k, v, gy, ys, zs, zexps, gw, gu, gk, gv, t, c, BLOCK=block
+        _wkv_backward_kernel[_grid(b, c)](
+            w, u, k, v, gy, ys, zs, zexps, gw, gu, gk, gv, t, c, BLOCK=_BLOCK
         )
+        return [gk, gv, gw.sum(0), gu.sum(0)]  # gw already includes the *w chain rule
+
+    @_wkv_backward_op.register_fake
+    def _(grad_y, w, u, k, v):
+        return [torch.empty_like(k), torch.empty_like(k), torch.empty_like(w), torch.empty_like(u)]
+
+    def _setup_context(ctx, inputs, output):
+        key, value, time_decay, time_first = inputs
+        ctx.save_for_backward(key, value, time_decay, time_first)
+
+    def _backward(ctx, grad_y):
+        key, value, time_decay, time_first = ctx.saved_tensors
+        w = (-torch.exp(time_decay.float())).contiguous()
+        u = time_first.float().contiguous()
+        k = key.float().contiguous()
+        v = value.float().contiguous()
+        gk, gv, gtd, gtf = torch.ops.myelin.wkv_backward(grad_y.float().contiguous(), w, u, k, v)
         return (
-            gk.to(ctx.orig_dtype),
-            gv.to(ctx.orig_dtype),
-            gw.sum(0).to(ctx.td_dtype),  # grad time_decay (kernel already applied *w)
-            gu.sum(0).to(ctx.tf_dtype),  # grad time_first
+            gk.to(key.dtype),
+            gv.to(value.dtype),
+            gtd.to(time_decay.dtype),
+            gtf.to(time_first.dtype),
         )
+
+    _wkv_forward_op.register_autograd(_backward, setup_context=_setup_context)
 
 
 def weighted_key_value_triton(
-    key: torch.Tensor,
-    value: torch.Tensor,
-    time_decay: torch.Tensor,
-    time_first: torch.Tensor,
-) -> torch.Tensor:
-    """RWKV WKV recurrence via the fused Triton kernel (CUDA only)."""
-    return _WKVTriton.apply(key, value, time_decay, time_first)
+    key: Tensor,
+    value: Tensor,
+    time_decay: Tensor,
+    time_first: Tensor,
+) -> Tensor:
+    """RWKV WKV recurrence via the fused Triton custom op (CUDA only)."""
+    return torch.ops.myelin.wkv_forward(key, value, time_decay, time_first)
