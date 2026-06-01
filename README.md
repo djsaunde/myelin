@@ -31,6 +31,34 @@ of those contract changes — not as a faster drop-in. Full rationale:
 [docs/training_recommendation.md](docs/training_recommendation.md); milestone
 status: [docs/roadmap.md](docs/roadmap.md).
 
+## Reproduction: SpikeGPT on enwik8
+
+We reproduce the SpikeGPT paper's enwik8 result. At the paper's **ctx-1024**
+setting our 41M model (12 layers / 512 embd) reaches **test BPC 1.281**
+(full-context strided eval on the held-out last 5M bytes) versus the paper's
+**1.283** — a match.
+
+Honest caveats: we use a **stabilized recipe** (cosine LR `4e-4 → 1e-5`, weight
+decay `0.1`, bf16) rather than the paper's literal `6e-4` / `wd 0`, because the
+literal recipe **diverges** in our setup (the LR is too high to converge and the
+iterate diffuses out of the minimum); training uses the first 95M bytes (vs the
+standard 90M), with the last 5M held out for test either way; and bf16 (with the
+WKV recurrence and LIF membrane kept in fp32) was validated to track fp32. bf16
+gives ~1.6x step-time under `torch.compile`, which makes the full ~10B-token
+budget tractable (~15h on one RTX 5090).
+
+```bash
+# train (full budget); checkpoints the best-val model
+uv run --extra tracking python examples/train_tiny_spikegpt.py \
+  --text-file data/enwik8 --vocab byte --context-length 1024 --layers 12 --embedding 512 \
+  --batch 12 --steps 833000 --lr 4e-4 --lr-final 1e-5 --warmup-steps 2000 \
+  --weight-decay 0.1 --dropout 0.03 --amp bf16 --compile regional \
+  --best-checkpoint-out runs/enwik8_repro.best.pt
+# evaluate (full-context BPC by default)
+uv run python examples/evaluate_spikegpt_checkpoint.py runs/enwik8_repro.best.pt \
+  --text-file data/enwik8_test --no-sample
+```
+
 ## Quickstart
 
 ```bash
