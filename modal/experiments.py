@@ -107,6 +107,30 @@ def lif_bf16_bench() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=20 * 60)
+def integrated_bf16_smoke() -> None:
+    """Confirm the integrated model takes the bf16-I/O LIF path end-to-end."""
+    _run(
+        "import torch\n"
+        "from unittest.mock import patch\n"
+        "import myelin.triton.lif_bf16 as m\n"
+        "from myelin.language import SpikeGPTConfig, SpikeLanguageModel\n"
+        "cfg=SpikeGPTConfig(vocab_size=256,context_length=256,n_layer=2,n_embd=128,dropout=0.0)\n"
+        "model=SpikeLanguageModel(cfg).to('cuda').train()\n"
+        "ids=torch.randint(0,256,(4,257),device='cuda')\n"
+        "calls={'n':0}; orig=m.surrogate_lif_bf16io\n"
+        "def spy(*a,**k): calls['n']+=1; return orig(*a,**k)\n"
+        "with patch.object(m,'surrogate_lif_bf16io',spy), "
+        "patch('myelin.language.surrogate_lif_bf16io',spy):\n"
+        "    with torch.autocast('cuda',dtype=torch.bfloat16):\n"
+        "        loss,_=model(ids[:,:256],ids[:,1:])\n"
+        "    loss.backward()\n"
+        "g=sum(p.grad.abs().sum().item() for p in model.parameters() if p.grad is not None)\n"
+        'print(f\'loss={float(loss):.3f}  grad_sum={g:.1f}  bf16-LIF calls={calls["n"]} '
+        "(expect {cfg.n_layer*2})')"
+    )
+
+
 @app.function(gpu=GPU, timeout=60 * 60)
 def lif_convergence_ab() -> None:
     """Train SpikeGPT twice (fp32 LIF vs bf16-I/O LIF) and compare val curves."""
