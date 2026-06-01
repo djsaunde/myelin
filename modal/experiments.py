@@ -107,6 +107,36 @@ def lif_bf16_bench() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=60 * 60)
+def lif_convergence_ab() -> None:
+    """Train SpikeGPT twice (fp32 LIF vs bf16-I/O LIF) and compare val curves."""
+    import io
+    import os
+    import urllib.request
+    import zipfile
+
+    if not os.path.exists("/tmp/enwik8"):
+        data = urllib.request.urlopen("http://mattmahoney.net/dc/enwik8.zip", timeout=180).read()
+        raw = zipfile.ZipFile(io.BytesIO(data)).read("enwik8")[:40_000_000]
+        with open("/tmp/enwik8", "wb") as f:
+            f.write(raw)
+    for lif in ("fp32", "bf16"):
+        subprocess.run(
+            [
+                VENV_PY,
+                f"{REMOTE}/examples/lif_convergence_ab.py",
+                "--text-file",
+                "/tmp/enwik8",
+                "--lif",
+                lif,
+                "--steps",
+                "4000",
+            ],
+            cwd=REMOTE,
+            check=True,
+        )
+
+
 @app.function(gpu=GPU, timeout=40 * 60)
 def compile_mode_ab() -> None:
     """A/B torch.compile modes on the 12L step (the open throughput question)."""
