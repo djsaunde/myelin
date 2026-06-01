@@ -434,6 +434,9 @@ def main() -> None:
         betas=(args.adam_beta1, args.adam_beta2),
         eps=args.adam_eps,
         weight_decay=args.weight_decay,
+        # Single fused CUDA kernel for the optimizer step (fewer launches than the
+        # default foreach path); CPU AdamW has no fused impl, so guard on device.
+        fused=torch.device(args.device).type == "cuda",
     )
     optimizer_loaded = False
     if checkpoint is not None and checkpoint.optimizer_state_dict is not None:
