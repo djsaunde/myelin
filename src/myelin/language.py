@@ -533,8 +533,20 @@ def evaluate_language_model_strided(
     context_length: int,
     device: str | torch.device,
     stride: int | None = None,
+    count_last: int | None = None,
 ) -> LanguageEval:
-    """Evaluate deterministic next-token windows over a corpus."""
+    """Evaluate deterministic next-token windows over a corpus.
+
+    By default every position of each window contributes to the loss. That
+    *inflates* BPC, because the first positions of each window are scored with
+    far less than ``context_length`` tokens of preceding context. For a faithful
+    full-context BPC (the metric the SpikeGPT/enwik8 literature reports), pass
+    ``count_last`` together with ``stride == count_last``: only the last
+    ``count_last`` targets of each window are scored (each with at least
+    ``context_length - count_last`` tokens of context), and the first window is
+    scored in full (its prefix is unavoidable). Counted targets then tile the
+    corpus exactly once.
+    """
 
     if tokens.ndim != 1:
         raise ValueError(f"tokens must be one-dimensional; got {tokens.shape}")
@@ -542,6 +554,8 @@ def evaluate_language_model_strided(
         raise ValueError("batch_size must be positive")
     if context_length <= 0:
         raise ValueError("context_length must be positive")
+    if count_last is not None and not 0 < count_last <= context_length:
+        raise ValueError("count_last must be in (0, context_length]")
     resolved_stride = context_length if stride is None else stride
     if resolved_stride <= 0:
         raise ValueError("stride must be positive")
@@ -553,7 +567,8 @@ def evaluate_language_model_strided(
     model.eval()
     total_loss = 0.0
     total_tokens = 0
-    loss_fn = nn.CrossEntropyLoss(reduction="sum")
+    reduction = "sum" if count_last is None else "none"
+    loss_fn = nn.CrossEntropyLoss(reduction=reduction)
     try:
         for offset in range(0, len(starts), batch_size):
             batch_starts = starts[offset : offset + batch_size]
@@ -566,9 +581,20 @@ def evaluate_language_model_strided(
             logits = model(inputs)
             if not isinstance(logits, torch.Tensor):
                 raise RuntimeError("evaluate_language_model_strided expected logits-only output")
-            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
-            total_loss += float(loss)
-            total_tokens += targets.numel()
+            if count_last is None:
+                loss = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+                total_loss += float(loss)
+                total_tokens += targets.numel()
+            else:
+                # per-position losses; score only the last ``count_last`` targets
+                # of each window (the whole first window, whose prefix is forced).
+                losses = loss_fn(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1)).reshape(
+                    len(batch_starts), context_length
+                )
+                for row, start in enumerate(batch_starts):
+                    lo = 0 if start == 0 else context_length - count_last
+                    total_loss += float(losses[row, lo:].sum())
+                    total_tokens += context_length - lo
     finally:
         if was_training:
             model.train()

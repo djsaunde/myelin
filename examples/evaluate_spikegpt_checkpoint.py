@@ -23,6 +23,15 @@ def main() -> None:
     parser.add_argument("--text-file", type=Path)
     parser.add_argument("--eval-batches", type=int, default=8)
     parser.add_argument("--eval-stride", type=int)
+    parser.add_argument(
+        "--count-last",
+        type=int,
+        help=(
+            "score only the last N targets of each strided window (full-context BPC; "
+            "defaults to context_length//4, with stride matched to it). Use --count-last 0 "
+            "to score all positions (legacy, inflates BPC)."
+        ),
+    )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument(
         "--random-eval",
@@ -90,15 +99,25 @@ def main() -> None:
                 )
                 eval_mode = "random"
             else:
+                # Full-context BPC by default: score the last `count_last` targets
+                # of each window with stride matched, so every counted token has
+                # near-full context. `--count-last 0` restores legacy all-position
+                # scoring (which inflates BPC).
+                count_last = (
+                    config.context_length // 4 if args.count_last is None else args.count_last
+                )
+                count_last = count_last or None  # 0 -> None (legacy all-position)
+                stride = args.eval_stride if args.eval_stride is not None else count_last
                 metrics = evaluate_language_model_strided(
                     model,
                     eval_tokens,
                     batch_size=args.batch,
                     context_length=config.context_length,
                     device=args.device,
-                    stride=args.eval_stride,
+                    stride=stride,
+                    count_last=count_last,
                 )
-                eval_mode = "strided"
+                eval_mode = f"strided(count_last={count_last})"
         except ValueError as exc:
             print(f"eval_skipped={exc}", flush=True)
         else:

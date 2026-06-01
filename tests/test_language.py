@@ -501,6 +501,55 @@ def test_evaluate_language_model_strided_is_deterministic_and_restores_training(
     assert model.training
 
 
+def test_evaluate_language_model_strided_count_last_matches_manual() -> None:
+    """count_last must score exactly the intended (token, position) pairs and be
+    invariant to batch size; it should differ from all-position scoring."""
+    torch.manual_seed(0)
+    model = SpikeLanguageModel(
+        SpikeGPTConfig(vocab_size=8, context_length=4, n_layer=1, n_embd=8, dropout=0.0)
+    ).eval()
+    tokens = torch.arange(20) % 8
+
+    full = evaluate_language_model_strided(
+        model, tokens, batch_size=2, context_length=4, device="cpu"
+    )
+    last2_a = evaluate_language_model_strided(
+        model, tokens, batch_size=2, context_length=4, device="cpu", stride=2, count_last=2
+    )
+    last2_b = evaluate_language_model_strided(
+        model, tokens, batch_size=5, context_length=4, device="cpu", stride=2, count_last=2
+    )
+
+    # batch-size invariant
+    assert last2_a.loss == pytest.approx(last2_b.loss)
+    # full-context scoring differs from all-position scoring (it drops low-context heads)
+    assert last2_a.loss != pytest.approx(full.loss)
+
+    # manual: for stride==count_last==2, counted targets tile the corpus; first
+    # window counts all 4 positions, later windows only their last 2.
+    with torch.no_grad():
+        starts = list(range(0, tokens.numel() - 4, 2))
+        total, n = 0.0, 0
+        for s in starts:
+            inp = tokens[s : s + 4].unsqueeze(0)
+            tgt = tokens[s + 1 : s + 5]
+            logp = torch.log_softmax(model(inp)[0], dim=-1)
+            lo = 0 if s == 0 else 4 - 2
+            for pos in range(lo, 4):
+                total += -float(logp[pos, int(tgt[pos])])
+                n += 1
+    assert last2_a.loss == pytest.approx(total / n, rel=1e-5)
+
+
+def test_evaluate_language_model_strided_rejects_bad_count_last() -> None:
+    model = SpikeLanguageModel(SpikeGPTConfig(vocab_size=8, context_length=4, n_layer=1, n_embd=8))
+    tokens = torch.arange(20) % 8
+    with pytest.raises(ValueError, match="count_last"):
+        evaluate_language_model_strided(
+            model, tokens, batch_size=2, context_length=4, device="cpu", count_last=5
+        )
+
+
 def test_spike_language_model_rejects_context_overflow() -> None:
     model = SpikeLanguageModel(SpikeGPTConfig(vocab_size=5, context_length=4))
 
