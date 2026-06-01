@@ -537,6 +537,7 @@ def main() -> None:
                 wandb_metrics = {
                     "train/loss": float(loss.detach()),
                     "train/step_ms": step_seconds * 1000,
+                    "train/tokens_per_s": args.batch * config.context_length / step_seconds,
                     "train/lr": optimizer.param_groups[0]["lr"],
                 }
                 if rates is not None:
