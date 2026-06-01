@@ -34,6 +34,8 @@ from myelin.surrogates import (
     hard_surrogate_spike,
     surrogate_from_name,
 )
+from myelin.triton.lif import surrogate_id as lif_surrogate_id
+from myelin.triton.lif_bf16 import surrogate_lif_bf16io
 from myelin.wkv_triton import weighted_key_value_triton
 
 # Reverse lookup (built-in surrogate callable -> name) so SpikingSequenceLIF can
@@ -694,19 +696,41 @@ class SpikingSequenceLIF(nn.Module):
             msg = f"inputs must have shape [B, T, C]; got {inputs.shape}"
             raise ValueError(msg)
 
-        # The membrane recurrence is numerically sensitive and the fused Triton
-        # kernel keeps a float32 carry, so reduced-precision (bf16/fp16) inputs are
-        # upcast to float32 here and the spikes cast back. No-op in a pure-fp32 run.
+        surrogate_name = self._fused_surrogate_name()
+        params = LIFParams(tau_mem=self.tau, threshold=self.threshold, reset=self.reset)
+
+        # Fast path: reduced-precision (bf16/fp16) store-all on CUDA uses the fused
+        # bf16-I/O kernel — bf16 inputs/spikes with an fp32 membrane carry (~1.5x the
+        # LIF op vs upcasting; convergence-validated to match the fp32 path).
+        if (
+            surrogate_name is not None
+            and inputs.is_cuda
+            and has_triton()
+            and inputs.dtype in (torch.float16, torch.bfloat16)
+            and not self.recompute
+        ):
+            currents = inputs.movedim(1, 0).contiguous()  # [T, B, C]
+            initial = LIFState(membrane=currents.new_zeros(currents.shape[1:]))
+            spikes = surrogate_lif_bf16io(
+                currents,
+                initial,
+                params,
+                surrogate_slope=self.surrogate_slope,
+                surrogate_id=lif_surrogate_id(surrogate_name),
+            )
+            return spikes.movedim(0, 1)
+
+        # Otherwise keep the membrane recurrence in fp32 by upcasting bf16/fp16
+        # inputs (no-op for a pure-fp32 run); covers fp32, the recompute variant,
+        # and the CPU loop fallback below.
         orig_dtype = inputs.dtype
         if orig_dtype in (torch.float16, torch.bfloat16):
             inputs = inputs.float()
 
         # Fused-time Triton kernel on CUDA: the time loop lives in the kernel, so it
         # needs no torch.compile and does not unroll. Falls back to the loop below.
-        surrogate_name = self._fused_surrogate_name()
         if surrogate_name is not None and inputs.is_cuda and has_triton():
             currents = inputs.movedim(1, 0).contiguous()  # [T, B, C]
-            params = LIFParams(tau_mem=self.tau, threshold=self.threshold, reset=self.reset)
             initial = LIFState(membrane=currents.new_zeros(currents.shape[1:]))
             run = (
                 triton_surrogate_lif_recompute_function
