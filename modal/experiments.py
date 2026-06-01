@@ -214,6 +214,44 @@ def ctx3072_lr_probe() -> None:
 
 
 @app.function(gpu=GPU, timeout=20 * 60)
+def kernel_autotune() -> None:
+    """Cheap occupancy A/B: WKV BLOCK and LIF block_size at the real shapes (fwd+bwd)."""
+    _run(
+        "import time, torch\n"
+        "import myelin.wkv_triton as W\n"
+        "from myelin.triton.lif_bf16 import surrogate_lif_bf16io\n"
+        "from myelin.neurons import LIFParams, LIFState\n"
+        "dev='cuda'; B,T,C=64,1024,512\n"
+        "def timed(fn,n=40):\n"
+        "    for _ in range(8): fn()\n"
+        "    torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "    for _ in range(n): fn()\n"
+        "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/n*1e3\n"
+        "k=torch.randn(B,T,C,device=dev); v=torch.randn(B,T,C,device=dev)\n"
+        "td=torch.randn(C,device=dev); tf=torch.randn(C,device=dev)\n"
+        "def wkv():\n"
+        "    a=[x.clone().requires_grad_(True) for x in (k,v,td,tf)]\n"
+        "    W.weighted_key_value_triton(*a).sum().backward()\n"
+        "print('WKV fwd+bwd (B64 T1024 C512):')\n"
+        "for blk in [32,64,128]:\n"
+        "    W._BLOCK=blk\n"
+        "    print(f'  BLOCK={blk}: {timed(wkv):.3f} ms', flush=True)\n"
+        "W._BLOCK=64\n"
+        "cur=torch.randn(T,B,C,device=dev,dtype=torch.bfloat16)\n"
+        "par=LIFParams(tau_mem=2.0,threshold=1.0,reset=0.0)\n"
+        "def lif(bs):\n"
+        "    def f():\n"
+        "        xi=cur.clone().requires_grad_(True)\n"
+        "        init=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "        surrogate_lif_bf16io(xi,init,par,block_size=bs).sum().backward()\n"
+        "    return f\n"
+        "print('LIF bf16-I/O fwd+bwd (T1024 B64 C512):')\n"
+        "for bs in [128,256,512]:\n"
+        "    print(f'  block_size={bs}: {timed(lif(bs)):.3f} ms', flush=True)\n"
+    )
+
+
+@app.function(gpu=GPU, timeout=20 * 60)
 def integrated_bf16_smoke() -> None:
     """Confirm the integrated model takes the bf16-I/O LIF path end-to-end."""
     _run(

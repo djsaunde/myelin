@@ -136,7 +136,7 @@ def surrogate_lif_bf16io(
     *,
     surrogate_slope: float = 2.0,
     surrogate_id: int = 2,
-    block_size: int = 256,
+    block_size: int = 128,  # ~2.5% faster than 256 here (occupancy; Modal sm_120 A/B)
 ) -> torch.Tensor:
     """Spikes from the bf16-I/O / fp32-carry surrogate LIF (CUDA only)."""
     _, spikes = _BF16LIF.apply(
