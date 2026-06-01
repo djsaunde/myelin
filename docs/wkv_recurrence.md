@@ -3,8 +3,16 @@
 The SpikeGPT time-mixing block uses the RWKV "weighted key-value" (WKV)
 recurrence (`myelin.language.weighted_key_value`). It is a first-order linear
 recurrence over the token/time axis: a decay-weighted running average of past
-values. This note records why the default implementation is an
+values. This note records why the **CPU / fallback** implementation is an
 `associative_scan` higher-order op rather than a Python time loop.
+
+> **Update:** on CUDA the default is now a hand-written **fused Triton kernel**
+> (`myelin.wkv_triton`, forward + backward ported from the reference RWKV
+> `cuda/wkv_cuda.cu`). It matches the loop oracle's gradients to fp32 (~1e-7) and
+> beats `associative_scan` (6L/512d ctx1024 bf16 regional-compile: ~10% faster
+> step, −24% peak memory), so `SpikeTimeMix.forward` dispatches to it when CUDA +
+> Triton are available and falls back to `associative_scan` otherwise. The rest
+> of this note explains the `associative_scan` fallback.
 
 ## The problem
 
