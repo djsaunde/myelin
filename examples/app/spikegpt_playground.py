@@ -14,11 +14,12 @@ import html
 import json
 import math
 from pathlib import Path
+from typing import cast
 
 import streamlit as st
 import torch
 
-from myelin import load_spike_language_checkpoint
+from myelin import SamplingMode, load_spike_language_checkpoint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().parent / "model_registry.json"
@@ -121,7 +122,7 @@ if st.button("Generate", type="primary"):
             max_new_tokens=int(max_new),
             temperature=float(temperature),
             top_k=int(top_k),
-            sampling=sampling,
+            sampling=cast(SamplingMode, sampling),
             use_cache=use_cache,
         )
     plen = prompt_ids.shape[1]

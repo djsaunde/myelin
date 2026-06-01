@@ -1,11 +1,18 @@
-# Pre-commit hooks for myelin.
+# Pre-commit hooks for myelin — kept in lockstep with the CI gate (.github/
+# workflows/ci.yml: ruff format --check, ruff check, pyright, pytest, build).
 #
-# Install once per clone:  uv run pre-commit install
-# Run on all files:        uv run pre-commit run --all-files
+# Install once per clone (both stages):
+#   uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+# Run everything on all files:
+#   uv run pre-commit run --all-files --hook-stage pre-push
 #
-# Hooks call the project's pinned ruff through `uv run`, so they use the exact
-# same ruff version as the CI gate (ruff format --check / ruff check) and never
-# drift from it.
+# Hooks call the project's pinned tools through `uv run`, so they use the exact
+# same versions as CI and never drift from it.
+#
+# - ruff (check + format): every commit, fast, autofixes.
+# - pyright: every commit AND push — this is the type gate CI runs; keeping it
+#   here prevents the "passes ruff but fails CI on pyright" drift.
+# - pytest: on push only (too slow for every commit) so a push can't land red CI.
 repos:
   - repo: local
     hooks:
@@ -21,3 +28,19 @@ repos:
         language: system
         types_or: [python, pyi]
         require_serial: true
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-commit, pre-push]
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-push]

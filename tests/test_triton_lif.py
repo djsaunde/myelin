@@ -3089,6 +3089,7 @@ def test_triton_surrogate_lif_recompute_matches_store_all() -> None:
     spikes_rec, gx_rec, gv_rec = run(True)
     assert torch.equal(spikes_store, spikes_rec)
     assert gx_store is not None and gx_rec is not None
+    assert gv_store is not None and gv_rec is not None
     assert torch.allclose(gx_store, gx_rec, atol=1e-5, rtol=1e-4)
     assert torch.allclose(gv_store, gv_rec, atol=1e-5, rtol=1e-4)
 

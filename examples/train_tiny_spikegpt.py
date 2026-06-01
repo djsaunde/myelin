@@ -68,7 +68,7 @@ def compile_spikegpt_regions(
     """Compile repeated SpikeGPT blocks while keeping the top-level loop eager."""
 
     for index, block in enumerate(model.blocks):
-        model.blocks[index] = torch.compile(block, fullgraph=fullgraph, options=options)
+        model.blocks[index] = torch.compile(block, fullgraph=fullgraph, options=options)  # type: ignore[arg-type]
     return model
 
 
@@ -282,7 +282,9 @@ def main() -> None:
     # UTF-8, so read them as bytes when using the byte vocabulary; otherwise read
     # UTF-8 text.
     byte_file_mode = args.text_file is not None and args.vocab == "byte"
+    raw_bytes: bytes = b""
     if byte_file_mode:
+        assert args.text_file is not None
         raw_bytes = args.text_file.read_bytes()
         if not raw_bytes:
             raise ValueError("text file is empty")

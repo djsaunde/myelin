@@ -143,7 +143,7 @@ if has_triton():
             o = no
 
     def _grid(b: int, c: int) -> tuple[int, int]:
-        return (b, triton.cdiv(c, _BLOCK))
+        return (b, int(triton.cdiv(c, _BLOCK)))
 
     @torch.library.custom_op("myelin::wkv_forward", mutates_args=())
     def _wkv_forward_op(
@@ -155,7 +155,7 @@ if has_triton():
         k = key.float().contiguous()
         v = value.float().contiguous()
         y = torch.empty_like(k)
-        _wkv_forward_kernel[_grid(b, c)](k, v, w, u, y, t, c, BLOCK=_BLOCK)
+        _wkv_forward_kernel[_grid(b, c)](k, v, w, u, y, t, c, BLOCK=_BLOCK)  # type: ignore[arg-type]
         return y.to(key.dtype)
 
     @_wkv_forward_op.register_fake
@@ -176,7 +176,21 @@ if has_triton():
         gk = torch.empty_like(k)
         gv = torch.empty_like(k)
         _wkv_backward_kernel[_grid(b, c)](
-            w, u, k, v, gy, ys, zs, zexps, gw, gu, gk, gv, t, c, BLOCK=_BLOCK
+            w,
+            u,
+            k,
+            v,
+            gy,
+            ys,
+            zs,
+            zexps,
+            gw,
+            gu,
+            gk,
+            gv,
+            t,
+            c,
+            BLOCK=_BLOCK,  # type: ignore[arg-type]
         )
         return [gk, gv, gw.sum(0), gu.sum(0)]  # gw already includes the *w chain rule
 
