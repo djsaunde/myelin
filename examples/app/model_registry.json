@@ -1,0 +1,23 @@
+[
+  {
+    "name": "SpikeGPT enwik8 — full repro (best)",
+    "path": "runs/spikegpt_enwik8_12L512d_repro.best.pt",
+    "dataset": "enwik8 (byte-level)",
+    "metric": "test BPC 1.281 (strided, full-context)",
+    "blurb": "Full ~10B-token reproduction. Matches the paper's 1.283 (ctx-1024). Stabilized recipe (lr 4e-4, wd 0.1), bf16, best-val checkpoint."
+  },
+  {
+    "name": "SpikeGPT enwik8 — v2 (120k)",
+    "path": "runs/spikegpt_enwik8_12L512d_v2.best.pt",
+    "dataset": "enwik8 (byte-level)",
+    "metric": "test BPC 1.338 (strided, full-context)",
+    "blurb": "Compressed 120k-step stabilized run. Reaches ~1.34 at 1/7 the paper budget."
+  },
+  {
+    "name": "SpikeGPT tinyshakespeare — base",
+    "path": "runs/spikegpt_shakespeare_base.pt",
+    "dataset": "tinyshakespeare",
+    "metric": "val BPC ~2.12",
+    "blurb": "Small 6L/256d model on tinyshakespeare. Coherent ROMEO/JULIET-style samples."
+  }
+]
