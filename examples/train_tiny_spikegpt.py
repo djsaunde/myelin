@@ -64,11 +64,21 @@ def compile_spikegpt_regions(
     *,
     fullgraph: bool,
     options: dict[str, object] | None = None,
+    mode: str | None = None,
 ) -> SpikeLanguageModel:
-    """Compile repeated SpikeGPT blocks while keeping the top-level loop eager."""
+    """Compile repeated SpikeGPT blocks while keeping the top-level loop eager.
+
+    ``mode`` (e.g. ``max-autotune-no-cudagraphs``) and ``options`` are mutually
+    exclusive in ``torch.compile``; pass at most one.
+    """
 
     for index, block in enumerate(model.blocks):
-        model.blocks[index] = torch.compile(block, fullgraph=fullgraph, options=options)  # type: ignore[arg-type]
+        model.blocks[index] = torch.compile(
+            block,
+            fullgraph=fullgraph,
+            options=options,  # type: ignore[arg-type]
+            mode=mode,
+        )
     return model
 
 
@@ -260,6 +270,16 @@ def main() -> None:
         help="checkpoint SpikeGPT blocks during training to reduce saved activations",
     )
     add_compile_policy_arg(parser, extra_policies=("regional", "regional-lite"))
+    parser.add_argument(
+        "--compile-mode",
+        choices=("default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"),
+        default="max-autotune-no-cudagraphs",
+        help=(
+            "torch.compile mode for --compile regional. Default max-autotune-no-cudagraphs "
+            "is ~7%% faster than default at the cost of a longer (autotuning) compile; "
+            "use 'default' for fast iteration. Ignored by regional-lite (fast-compile preset)."
+        ),
+    )
     add_grad_clip_arg(parser)
     add_matmul_precision_arg(parser, default="high")
     parser.add_argument(
@@ -367,6 +387,7 @@ def main() -> None:
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
+        f"compile_mode:{args.compile_mode},"
         f"vocab:{actual_vocab},preset:{args.preset},model_type:{config.model_type},"
         f"context_length:{config.context_length},layers:{config.n_layer},"
         f"embedding:{config.n_embd},"
@@ -393,11 +414,16 @@ def main() -> None:
     print_model_summary(raw_model)
     print()
 
+    # regional-lite keeps its fast-compile options preset; regional uses --compile-mode
+    # (mode and options are mutually exclusive in torch.compile).
+    regional_lite = args.compile == "regional-lite"
+    compile_mode = None if (regional_lite or args.compile_mode == "default") else args.compile_mode
     model = (
         compile_spikegpt_regions(
             raw_model,
             fullgraph=args.compile == "regional",
-            options=REGIONAL_LITE_COMPILE_OPTIONS if args.compile == "regional-lite" else None,
+            options=REGIONAL_LITE_COMPILE_OPTIONS if regional_lite else None,
+            mode=compile_mode,
         )
         if args.compile in ("regional", "regional-lite")
         else compile_training_model(raw_model, compile_model)
