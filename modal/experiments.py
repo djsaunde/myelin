@@ -213,6 +213,46 @@ def ctx3072_lr_probe() -> None:
         )
 
 
+@app.function(gpu=GPU, timeout=40 * 60)
+def compile_scope_ab() -> None:
+    """A/B regional (per-block) vs full-model torch.compile on the 12L step."""
+    _run(
+        "import time, torch\n"
+        "from myelin.language import SpikeGPTConfig, SpikeLanguageModel\n"
+        "torch.set_float32_matmul_precision('high')\n"
+        "dev='cuda'; B,T=64,1024\n"
+        "cfg=SpikeGPTConfig(vocab_size=256,context_length=T,n_layer=12,n_embd=512,dropout=0.03)\n"
+        "def bench(scope):\n"
+        "    torch.manual_seed(0); torch._dynamo.reset()\n"
+        "    m=SpikeLanguageModel(cfg).to(dev).train()\n"
+        "    if scope=='regional':\n"
+        "        for i,blk in enumerate(m.blocks): m.blocks[i]=torch.compile(blk)\n"
+        "        run=m\n"
+        "    else:\n"
+        "        run=torch.compile(m)\n"
+        "    opt=torch.optim.AdamW(m.parameters(),lr=1e-4,fused=True)\n"
+        "    ids=torch.randint(0,256,(B,T+1),device=dev); inp,tgt=ids[:,:T],ids[:,1:]\n"
+        "    ts=[]\n"
+        "    for i in range(14):\n"
+        "        torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "        opt.zero_grad(set_to_none=True)\n"
+        "        with torch.autocast('cuda',dtype=torch.bfloat16): loss,_=run(inp,tgt)\n"
+        "        loss.backward(); opt.step(); torch.cuda.synchronize()\n"
+        "        if i>=4: ts.append((time.perf_counter()-t0)*1e3)\n"
+        "    ts.sort(); ms=ts[len(ts)//2]; peak=torch.cuda.max_memory_allocated()/1e9\n"
+        "    del m,opt; torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()\n"
+        "    return ms,peak,float(loss)\n"
+        "print('12L/512d ctx1024 B64 bf16 default-mode:')\n"
+        "print('| scope | step ms | peak GB | loss |'); print('|---|--:|--:|--:|')\n"
+        "for scope in ['regional','full']:\n"
+        "    try:\n"
+        "        ms,peak,l=bench(scope)\n"
+        "        print(f'| {scope} | {ms:.1f} | {peak:.2f} | {l:.3f} |',flush=True)\n"
+        "    except Exception as e:\n"
+        "        print(f'| {scope} | ERR {type(e).__name__}: {str(e)[:60]} | | |',flush=True)\n"
+    )
+
+
 @app.function(gpu=GPU, timeout=20 * 60)
 def kernel_autotune() -> None:
     """Cheap occupancy A/B: WKV BLOCK and LIF block_size at the real shapes (fwd+bwd)."""
