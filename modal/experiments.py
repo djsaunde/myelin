@@ -122,7 +122,7 @@ def ctx3072_sweep() -> None:
         "print(f'{torch.cuda.get_device_name()} | 12L/512d ctx{T} bf16 regional-compile')\n"
         "print('| batch | step ms | tok/s | peak GB | fits 32GB? |')\n"
         "print('|--:|--:|--:|--:|--|')\n"
-        "for B in [8,16,24,32,48,64]:\n"
+        "for B in [64,72,80,88]:\n"
         "    torch.manual_seed(0); torch._dynamo.reset()\n"
         "    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()\n"
         "    try:\n"
@@ -145,6 +145,72 @@ def ctx3072_sweep() -> None:
         "    except torch.cuda.OutOfMemoryError:\n"
         "        print(f'| {B} | OOM | | >96 | NO |',flush=True); break\n"
     )
+
+
+@app.function(gpu=GPU, timeout=90 * 60)
+def ctx3072_lr_probe() -> None:
+    """Light LR probe for the ctx-3072 / batch-72 repro: fixed-LR arms, ~1800 steps.
+
+    Reuses the production trainer (--lr == --lr-final → constant LR). Brackets the
+    tuned 2e-3 (batch-64/ctx-1024) against 4e-3, since batch-72/ctx-3072 averages
+    ~3.4x more tokens/step (less gradient noise → likely tolerates a higher LR).
+    """
+    import io
+    import os
+    import urllib.request
+    import zipfile
+
+    if not os.path.exists("/tmp/enwik8"):
+        data = urllib.request.urlopen("http://mattmahoney.net/dc/enwik8.zip", timeout=180).read()
+        with open("/tmp/enwik8", "wb") as f:
+            f.write(zipfile.ZipFile(io.BytesIO(data)).read("enwik8")[:60_000_000])
+    for lr in ("2e-3", "4e-3"):
+        print(f"=== ctx3072 batch72 fixed LR {lr} ===", flush=True)
+        subprocess.run(
+            [
+                VENV_PY,
+                f"{REMOTE}/examples/train_tiny_spikegpt.py",
+                "--device",
+                "cuda",
+                "--text-file",
+                "/tmp/enwik8",
+                "--vocab",
+                "byte",
+                "--val-fraction",
+                "0.05",
+                "--context-length",
+                "3072",
+                "--layers",
+                "12",
+                "--embedding",
+                "512",
+                "--batch",
+                "72",
+                "--steps",
+                "1800",
+                "--lr",
+                lr,
+                "--lr-final",
+                lr,
+                "--warmup-steps",
+                "200",
+                "--weight-decay",
+                "0.1",
+                "--dropout",
+                "0.03",
+                "--compile",
+                "regional",
+                "--compile-mode",
+                "default",
+                "--compile-warmup",
+                "--log-every",
+                "100",
+                "--eval-every",
+                "600",
+            ],
+            cwd=REMOTE,
+            check=True,
+        )
 
 
 @app.function(gpu=GPU, timeout=20 * 60)
