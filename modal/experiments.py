@@ -62,6 +62,51 @@ def gpu_info() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=30 * 60)
+def lif_bf16_bench() -> None:
+    """Validate + benchmark the prototype bf16-I/O LIF vs the fp32-I/O kernel."""
+    _run(
+        "import time, torch\n"
+        "from myelin.language import SpikingSequenceLIF\n"
+        "from myelin.neurons import LIFParams, LIFState\n"
+        "from myelin.triton.lif_bf16 import surrogate_lif_bf16io\n"
+        "dev='cuda'; B,T,C=64,1024,512\n"
+        "# --- parity: feed bf16-rounded inputs to both; isolates the bf16-storage effect\n"
+        "torch.manual_seed(0)\n"
+        "xb=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "xf=xb.float().clone().requires_grad_(True)\n"
+        "ref=SpikingSequenceLIF(tau=2.0,threshold=1.0,surrogate_slope=2.0,fused=False).to(dev)\n"
+        "sp_ref=ref(xf); gy=torch.randn_like(sp_ref); sp_ref.backward(gy)\n"
+        "xp=xb.clone().requires_grad_(True)\n"
+        "cur=xp.movedim(1,0).contiguous()\n"
+        "init=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "sp_p=surrogate_lif_bf16io(cur,init,LIFParams(tau_mem=2.0,threshold=1.0,reset=0.0)).movedim(0,1)\n"
+        "sp_p.backward(gy.bfloat16())\n"
+        "spike_match=(sp_p.float()==sp_ref).float().mean().item()\n"
+        "gref=xf.grad; gp=xp.grad.float()\n"
+        "rel=((gp-gref).abs().max()/(gref.abs().max()+1e-9)).item()\n"
+        "print(f'parity: spikes match {spike_match*100:.2f}%  grad rel-err {rel:.3e}')\n"
+        "# --- bench fwd+bwd: bf16-I/O prototype vs fp32-I/O production kernel\n"
+        "def bench(make, x):\n"
+        "    for _ in range(5): _do(make,x)\n"
+        "    torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "    for _ in range(30): _do(make,x)\n"
+        "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/30*1e3\n"
+        "def _do(make,x):\n"
+        "    xi=x.clone().requires_grad_(True); s=make(xi); s.sum().backward()\n"
+        "fp32=SpikingSequenceLIF(tau=2.0,threshold=1.0,surrogate_slope=2.0,fused=True).to(dev)\n"
+        "x32=torch.randn(B,T,C,device=dev)\n"
+        "def proto(xi):\n"
+        "    c=xi.movedim(1,0).contiguous()\n"
+        "    i=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=xi.dtype))\n"
+        "    return surrogate_lif_bf16io(c,i,LIFParams(tau_mem=2.0,threshold=1.0,reset=0.0))\n"
+        "ms32=bench(lambda xi: fp32(xi), x32)\n"
+        "msbf=bench(proto, xb)\n"
+        "print(f'LIF fwd+bwd  fp32-I/O {ms32:.3f} ms  |  "
+        "bf16-I/O {msbf:.3f} ms  ({ms32/msbf:.2f}x)')"
+    )
+
+
 @app.function(gpu=GPU, timeout=40 * 60)
 def compile_mode_ab() -> None:
     """A/B torch.compile modes on the 12L step (the open throughput question)."""
