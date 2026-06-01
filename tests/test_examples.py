@@ -28,6 +28,39 @@ def test_compile_policy_resolves_cpu_modes() -> None:
     assert not resolve_compile_policy("off", "cpu")
 
 
+def test_wsd_lr_schedule() -> None:
+    examples_dir = Path(__file__).resolve().parents[1] / "examples"
+    sys.path.insert(0, str(examples_dir))
+    try:
+        from train_tiny_spikegpt import wsd_lr
+    finally:
+        sys.path.pop(0)
+
+    total, warm, decay, lo, hi = 1000, 100, 200, 1e-5, 1e-3
+    kw = dict(total_steps=total, lr_init=hi, lr_final=lo, warmup_steps=warm, decay_steps=decay)
+    # warmup ramps to lr_init
+    assert wsd_lr(0, **kw) == pytest.approx(hi / warm)
+    assert wsd_lr(warm - 1, **kw) == pytest.approx(hi)
+    # stable phase is exactly constant at lr_init
+    assert wsd_lr(warm, **kw) == pytest.approx(hi)
+    assert wsd_lr(500, **kw) == pytest.approx(hi)
+    assert wsd_lr(total - decay - 1, **kw) == pytest.approx(hi)
+    # decay window: starts at lr_init, ends at lr_final
+    assert wsd_lr(total - decay, **kw) == pytest.approx(hi)
+    assert wsd_lr(total - 1, **kw) == pytest.approx(lo, abs=2e-5)
+    # decay_steps=0 -> constant after warmup (the indefinite "stable" run)
+    stable = dict(total_steps=1000, lr_init=hi, lr_final=lo, warmup_steps=warm, decay_steps=0)
+    assert wsd_lr(999, **stable) == hi
+    # decay-branch: resume at previous_steps=800, decay over the whole 200-step sub-run
+    branch = dict(total_steps=1000, lr_init=hi, lr_final=lo, warmup_steps=0, decay_steps=200)
+    assert wsd_lr(800, **branch) == pytest.approx(hi)  # first sub-run step = decay start
+    assert wsd_lr(999, **branch) == pytest.approx(lo, abs=2e-5)
+    # shapes monotonically decrease through the decay window
+    for shape in ("cosine", "linear", "sqrt"):
+        mids = [wsd_lr(total - decay + i, decay_shape=shape, **kw) for i in (0, 100, 199)]
+        assert mids[0] > mids[1] > mids[2]
+
+
 @pytest.mark.extended
 def test_mnist_rate_help_describes_backend_recommendation() -> None:
     example = Path(__file__).resolve().parents[1] / "examples" / "train_mnist_rate.py"

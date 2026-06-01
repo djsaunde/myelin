@@ -94,6 +94,37 @@ def cosine_lr(
     return lr_final + 0.5 * (lr_init - lr_final) * (1.0 + math.cos(math.pi * progress))
 
 
+def wsd_lr(
+    step: int,
+    total_steps: int,
+    lr_init: float,
+    lr_final: float,
+    warmup_steps: int,
+    decay_steps: int,
+    decay_shape: str = "cosine",
+) -> float:
+    """Warmup-Stable-Decay LR: linear warmup, constant ``lr_init``, then a final
+    ``decay_steps`` window annealing to ``lr_final``.
+
+    The stable phase is length-agnostic, so a constant-LR run (``decay_steps=0``)
+    can be checkpointed and "decay-branched" later: resume from a stable
+    checkpoint with ``decay_steps == total_steps - previous_steps`` and the whole
+    sub-run becomes the decay, annealing to ``lr_final`` without committing the
+    main run to a fixed length.
+    """
+    if warmup_steps > 0 and step < warmup_steps:
+        return lr_init * (step + 1) / warmup_steps
+    decay_start = total_steps - decay_steps
+    if step < decay_start:
+        return lr_init
+    progress = min(max((step - decay_start) / max(1, decay_steps), 0.0), 1.0)
+    if decay_shape == "linear":
+        return lr_init + (lr_final - lr_init) * progress
+    if decay_shape == "sqrt":  # MiniCPM-style 1-sqrt
+        return lr_init - (lr_init - lr_final) * math.sqrt(progress)
+    return lr_final + 0.5 * (lr_init - lr_final) * (1.0 + math.cos(math.pi * progress))
+
+
 def mark_compiled_invocation_boundary(enabled: bool) -> None:
     if not enabled:
         return
@@ -137,9 +168,32 @@ def main() -> None:
         "--lr-final",
         type=float,
         default=None,
-        help="final LR for cosine decay over the run; unset keeps a fixed LR",
+        help="final LR for the decay schedule over the run; unset keeps a fixed LR",
     )
     parser.add_argument("--warmup-steps", type=int, default=0, help="linear LR warmup steps")
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("cosine", "wsd"),
+        default="cosine",
+        help=(
+            "LR decay schedule (when --lr-final is set). cosine: warmup->cosine over the "
+            "whole run. wsd: warmup->constant->decay over the last --decay-steps; with "
+            "--decay-steps 0 it is constant-after-warmup (decay-branch from a checkpoint by "
+            "resuming with --decay-steps == remaining steps)."
+        ),
+    )
+    parser.add_argument(
+        "--decay-steps",
+        type=int,
+        default=0,
+        help="wsd: length of the final decay window (0 = no decay, pure stable phase)",
+    )
+    parser.add_argument(
+        "--decay-shape",
+        choices=("cosine", "linear", "sqrt"),
+        default="cosine",
+        help="wsd decay curve shape",
+    )
     parser.add_argument("--adam-beta1", type=float, default=0.9)
     parser.add_argument("--adam-beta2", type=float, default=0.999)
     parser.add_argument("--adam-eps", type=float, default=1e-8)
@@ -303,6 +357,11 @@ def main() -> None:
         if args.compile in ("regional", "regional-lite")
         else resolve_compile_policy(args.compile, args.device)
     )
+    wsd_cfg = (
+        f"decay_steps:{args.decay_steps},decay_shape:{args.decay_shape},"
+        if args.lr_schedule == "wsd"
+        else ""
+    )
     print(
         "config="
         f"device:{args.device},compile:{compile_model},compile_policy:{args.compile},"
@@ -313,6 +372,7 @@ def main() -> None:
         f"weight_decay:{args.weight_decay},dropout:{config.dropout},"
         f"lif_threshold:{config.lif_threshold},"
         f"grad_clip:{args.grad_clip},"
+        f"lr_schedule:{args.lr_schedule},{wsd_cfg}"
         f"amp:{args.amp},matmul_precision:{args.matmul_precision},"
         f"compile_warmup:{args.compile_warmup},"
         f"spike_embedding:{config.spike_embedding},"
@@ -475,9 +535,20 @@ def main() -> None:
         for step in range(1, args.steps + 1):
             global_step = previous_steps + step
             if args.lr_final is not None:
-                lr_now = cosine_lr(
-                    global_step - 1, total_steps, args.lr, args.lr_final, args.warmup_steps
-                )
+                if args.lr_schedule == "wsd":
+                    lr_now = wsd_lr(
+                        global_step - 1,
+                        total_steps,
+                        args.lr,
+                        args.lr_final,
+                        args.warmup_steps,
+                        args.decay_steps,
+                        args.decay_shape,
+                    )
+                else:
+                    lr_now = cosine_lr(
+                        global_step - 1, total_steps, args.lr, args.lr_final, args.warmup_steps
+                    )
                 for group in optimizer.param_groups:
                     group["lr"] = lr_now
             inputs, targets = sample_token_batch(
