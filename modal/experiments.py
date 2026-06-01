@@ -107,6 +107,46 @@ def lif_bf16_bench() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=50 * 60)
+def ctx3072_sweep() -> None:
+    """Batch sweep at ctx 3072 (12L/512d) — find tok/s + peak GB for the ctx-3072 repro.
+
+    Peak GB also tells us the local 32GB ceiling (RTX-PRO-6000 here is 96GB).
+    """
+    _run(
+        "import time, torch\n"
+        "from myelin.language import SpikeGPTConfig, SpikeLanguageModel\n"
+        "torch.set_float32_matmul_precision('high')\n"
+        "dev='cuda'; T=3072\n"
+        "cfg=SpikeGPTConfig(vocab_size=256,context_length=T,n_layer=12,n_embd=512,dropout=0.03)\n"
+        "print(f'{torch.cuda.get_device_name()} | 12L/512d ctx{T} bf16 regional-compile')\n"
+        "print('| batch | step ms | tok/s | peak GB | fits 32GB? |')\n"
+        "print('|--:|--:|--:|--:|--|')\n"
+        "for B in [8,16,24,32,48,64]:\n"
+        "    torch.manual_seed(0); torch._dynamo.reset()\n"
+        "    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()\n"
+        "    try:\n"
+        "        m=SpikeLanguageModel(cfg).to(dev).train()\n"
+        "        for i,blk in enumerate(m.blocks): m.blocks[i]=torch.compile(blk)\n"
+        "        opt=torch.optim.AdamW(m.parameters(),lr=1e-4)\n"
+        "        ids=torch.randint(0,256,(B,T+1),device=dev); inp,tgt=ids[:,:T],ids[:,1:]\n"
+        "        ts=[]\n"
+        "        for i in range(10):\n"
+        "            torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "            opt.zero_grad(set_to_none=True)\n"
+        "            with torch.autocast('cuda',dtype=torch.bfloat16): loss,_=m(inp,tgt)\n"
+        "            loss.backward(); opt.step(); torch.cuda.synchronize()\n"
+        "            if i>=4: ts.append((time.perf_counter()-t0)*1e3)\n"
+        "        ts.sort(); ms=ts[len(ts)//2]; peak=torch.cuda.max_memory_allocated()/1e9\n"
+        "        fits='yes' if peak<31 else 'NO'\n"
+        "        print(f'| {B} | {ms:.0f} | {B * T / ms * 1000:,.0f} | "
+        "{peak:.1f} | {fits} |', flush=True)\n"
+        "        del m,opt\n"
+        "    except torch.cuda.OutOfMemoryError:\n"
+        "        print(f'| {B} | OOM | | >96 | NO |',flush=True); break\n"
+    )
+
+
 @app.function(gpu=GPU, timeout=20 * 60)
 def integrated_bf16_smoke() -> None:
     """Confirm the integrated model takes the bf16-I/O LIF path end-to-end."""
