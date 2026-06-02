@@ -169,7 +169,7 @@ if st.button("Generate", type="primary"):
     dead_total = sum(p.dead_count for p in block_pops)
     sat_total = sum(p.saturated_count for p in block_pops)
     block_neurons = sum(p.num_channels for p in block_pops)
-    silent_pct = (dead_total + sat_total) / block_neurons * 100 if block_neurons else 0.0
+    dead_sat_pct = (dead_total + sat_total) / block_neurons * 100 if block_neurons else 0.0
     s1, s2, s3 = st.columns(3)
     emb = pops["embedding"].density if "embedding" in pops else float("nan")
     s1.metric("Embedding spike rate", f"{emb * 100:.1f}%")
@@ -179,14 +179,14 @@ if st.button("Generate", type="primary"):
         help="Fraction of neurons firing — sparsity is the point of an SNN.",
     )
     s3.metric(
-        "Silent / saturated / total",
+        "Dead / saturated / total",
         f"{dead_total} / {sat_total} / {block_neurons:,}",
-        f"{silent_pct:.1f}% of block neurons",
+        f"{dead_sat_pct:.1f}% of block neurons",
         delta_color="off",
-        help="Block neurons that did not fire / fired on (nearly) every token "
+        help="Block neurons that never fired / fired on (nearly) every token "
         f"**in this {view.shape[1]}-token sample** / total block neurons "
         f"(2 LIF populations × {config.n_layer} layers × {config.n_embd} channels). "
-        "On a short sample a silent neuron usually just had few chances to fire; "
+        "On a short sample a dead neuron usually just had few chances to fire; "
         "run examples/analyze_spikegpt_spikes.py over a corpus for the true "
         "dead-neuron count (~0.1% for the ctx-3072 model).",
     )
@@ -214,7 +214,7 @@ if st.button("Generate", type="primary"):
                 "population": list(pops),
                 "neurons": [p.num_channels for p in pops.values()],
                 "density %": [f"{p.density * 100:.1f}" for p in pops.values()],
-                "silent": [f"{p.dead_count} ({p.dead_fraction * 100:.1f}%)" for p in pops.values()],
+                "dead": [f"{p.dead_count} ({p.dead_fraction * 100:.1f}%)" for p in pops.values()],
                 "saturated": [
                     f"{p.saturated_count} ({p.saturated_fraction * 100:.1f}%)"
                     for p in pops.values()
