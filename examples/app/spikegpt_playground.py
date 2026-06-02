@@ -161,6 +161,8 @@ if st.button("Generate", type="primary"):
     mean_block = sum(p.density for p in block_pops) / len(block_pops) if block_pops else 0.0
     dead_total = sum(p.dead_count for p in block_pops)
     sat_total = sum(p.saturated_count for p in block_pops)
+    block_neurons = sum(p.num_channels for p in block_pops)
+    unhealthy_pct = (dead_total + sat_total) / block_neurons * 100 if block_neurons else 0.0
     s1, s2, s3 = st.columns(3)
     emb = pops["embedding"].density if "embedding" in pops else float("nan")
     s1.metric("Embedding spike rate", f"{emb * 100:.1f}%")
@@ -170,9 +172,13 @@ if st.button("Generate", type="primary"):
         help="Fraction of neurons firing — sparsity is the point of an SNN.",
     )
     s3.metric(
-        "Dead / saturated (block neurons)",
-        f"{dead_total} / {sat_total}",
-        help="Neurons that never fire / fire on (nearly) every token in this sample.",
+        "Dead / saturated",
+        f"{dead_total} / {sat_total}  of  {block_neurons:,}",
+        f"{unhealthy_pct:.1f}% unhealthy",
+        delta_color="inverse",
+        help="Block neurons that never fire / fire on (nearly) every token in this "
+        "sample, against the total number of block neurons (2 LIF populations × "
+        f"{config.n_layer} layers × {config.n_embd} channels).",
     )
 
     with st.expander("Spiking analysis — per-layer, per-position, neuron health"):
@@ -196,9 +202,13 @@ if st.button("Generate", type="primary"):
         st.table(
             {
                 "population": list(pops),
+                "neurons": [p.num_channels for p in pops.values()],
                 "density %": [f"{p.density * 100:.1f}" for p in pops.values()],
-                "dead": [p.dead_count for p in pops.values()],
-                "saturated": [p.saturated_count for p in pops.values()],
+                "dead": [f"{p.dead_count} ({p.dead_fraction * 100:.1f}%)" for p in pops.values()],
+                "saturated": [
+                    f"{p.saturated_count} ({p.saturated_fraction * 100:.1f}%)"
+                    for p in pops.values()
+                ],
             }
         )
 
