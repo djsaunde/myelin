@@ -1,10 +1,17 @@
 [
   {
-    "name": "SpikeGPT enwik8 — best (batch-64 fast)",
+    "name": "SpikeGPT enwik8 — ctx-3072 (headline, beats paper)",
+    "path": "runs/spikegpt_enwik8_12L512d_ctx3072.step70k.bak.pt",
+    "dataset": "enwik8 (byte-level)",
+    "metric": "test BPC 1.254 (strided, full-context)",
+    "blurb": "ctx-3072 / batch-24 / lr-8e-4 run. Beats the paper's headline ctx-3072 result (1.262) — from a checkpoint at only ~57% of the planned budget."
+  },
+  {
+    "name": "SpikeGPT enwik8 — ctx-1024 best (batch-64 fast)",
     "path": "runs/spikegpt_enwik8_12L512d_fast.best.pt",
     "dataset": "enwik8 (byte-level)",
     "metric": "test BPC 1.235 (strided, full-context)",
-    "blurb": "Tuned batch-64 / lr-2e-3 run (~9h). Beats the paper's 1.283 by ~0.05 and the batch-12 run (1.281) — faster AND a better optimum."
+    "blurb": "Tuned batch-64 / lr-2e-3 run (~9h). Beats the paper's ctx-1024 1.283 by ~0.05 and the batch-12 run (1.281) — faster AND a better optimum."
   },
   {
     "name": "SpikeGPT enwik8 — batch-12 repro",

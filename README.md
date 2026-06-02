@@ -33,29 +33,40 @@ status: [docs/roadmap.md](docs/roadmap.md).
 
 ## Reproduction: SpikeGPT on enwik8
 
-We reproduce the SpikeGPT paper's enwik8 result. At the paper's **ctx-1024**
-setting our 41M model (12 layers / 512 embd) reaches **test BPC 1.281**
-(full-context strided eval on the held-out last 5M bytes) versus the paper's
-**1.283** — a match.
+We reproduce — and beat — the SpikeGPT paper's enwik8 result with a 41M model
+(12 layers / 512 embd), on a single consumer RTX 5090. All numbers are
+full-context strided eval (BPC) on the held-out last 5M bytes.
 
-Honest caveats: we use a **stabilized recipe** (cosine LR `4e-4 → 1e-5`, weight
-decay `0.1`, bf16) rather than the paper's literal `6e-4` / `wd 0`, because the
-literal recipe **diverges** in our setup (the LR is too high to converge and the
-iterate diffuses out of the minimum); training uses the first 95M bytes (vs the
-standard 90M), with the last 5M held out for test either way; and bf16 (with the
-WKV recurrence and LIF membrane kept in fp32) was validated to track fp32. bf16
-gives ~1.6x step-time under `torch.compile`, which makes the full ~10B-token
-budget tractable (~15h on one RTX 5090).
+| Setting | Our test BPC | Paper | Recipe / cost |
+|---|---:|---:|---|
+| **ctx-1024 (tuned)** | **1.235** | 1.283 | batch 64, lr `2e-3`, ~9h — beats the paper |
+| ctx-1024 (batch-12 repro) | 1.281 | 1.283 | full ~10B-token budget, ~15h — a match |
+| **ctx-3072 (headline)** | **1.254** | 1.262 | batch 24, lr `8e-4`, ctx 3072 — beats the paper |
+
+The tuned ctx-1024 run is both **faster and better** than the faithful batch-12
+reproduction (a larger batch with a correspondingly larger LR finds a better
+optimum in ~60% of the wall-clock). At the paper's headline **ctx-3072** setting
+we beat 1.262 as well.
+
+Honest caveats: we use a **stabilized recipe** (cosine LR decay, weight decay
+`0.1`, bf16) rather than the paper's literal `6e-4` / `wd 0`, because the literal
+recipe **diverges** in our setup (LR too high — the iterate diffuses out of the
+minimum); training uses the first 95M bytes (vs the standard 90M), last 5M held
+out for test either way; bf16 (WKV recurrence and LIF membrane kept in fp32) was
+validated to track fp32 and gives ~1.6x step-time under `torch.compile`. The WKV
+recurrence runs through a fused Triton custom op on CUDA (a sequential-over-time
+kernel; benchmarked ~5-9x faster than chunked/parallel matmul forms — see
+[benchmarks/results/wkv_throughput_rtxpro6000.md](benchmarks/results/wkv_throughput_rtxpro6000.md)).
 
 ```bash
-# train (full budget); checkpoints the best-val model
+# train the tuned ctx-1024 model (best test BPC, ~9h on one 5090)
 uv run --extra tracking python examples/train_tiny_spikegpt.py \
   --text-file data/enwik8 --vocab byte --context-length 1024 --layers 12 --embedding 512 \
-  --batch 12 --steps 833000 --lr 4e-4 --lr-final 1e-5 --warmup-steps 2000 \
+  --batch 64 --steps 156000 --lr 2e-3 --lr-final 1e-5 --warmup-steps 2000 \
   --weight-decay 0.1 --dropout 0.03 --amp bf16 --compile regional \
-  --best-checkpoint-out runs/enwik8_repro.best.pt
+  --best-checkpoint-out runs/enwik8_fast.best.pt
 # evaluate (full-context BPC by default)
-uv run python examples/evaluate_spikegpt_checkpoint.py runs/enwik8_repro.best.pt \
+uv run python examples/evaluate_spikegpt_checkpoint.py runs/enwik8_fast.best.pt \
   --text-file data/enwik8_test --no-sample
 ```
 

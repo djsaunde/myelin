@@ -45,6 +45,20 @@ cold compile, fwd+bwd (see `benchmarks/results/spikegpt_wkv_compare_5090.md` and
 | `scan` HOP | fails / wrong | — | low | **WRONG** |
 | **`associative_scan` (generic)** | ~51 s | **1.8 ms** | **231 MB** | **correct** |
 
+> **Throughput at production scale (C=512, T=1024-3072):** the table above is
+> compile-focused at C=128. A separate throughput benchmark
+> (`myelin.benchmarks.wkv_throughput`,
+> [results](../benchmarks/results/wkv_throughput_rtxpro6000.md)) pits the
+> production **Triton kernel** against the chunked/parallel matmul forms at real
+> shapes. The Triton kernel is **5-9x faster (fwd+bwd) and lighter at every
+> shape** — e.g. B=24/T=3072 bf16: 7.5 ms vs 50 ms (chunked-128). The reason is
+> structural: RWKV-v4 WKV is a **per-channel diagonal** recurrence with no
+> contraction (head) dimension, so the matmul form is C independent tiny L×L
+> matmuls doing O(C·T·chunk) FLOPs vs the recurrence's O(C·T) — it cannot fill
+> tensor cores. Chunked-matmul is therefore **not** a throughput lever here; the
+> only matmul-friendly route is an architecture change (matrix-valued / multi-head
+> state, à la RWKV-5/6 gated linear attention).
+
 ## Why `associative_scan` (generic mode)
 
 WKV is a linear recurrence, so it fits an associative scan: each token is a

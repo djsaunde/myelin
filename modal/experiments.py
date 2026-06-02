@@ -381,3 +381,39 @@ def compile_mode_ab() -> None:
         "    except Exception as e:\n"
         "        print(f'| {mode} | ERR {type(e).__name__}: {str(e)[:50]} | | |',flush=True)"
     )
+
+
+@app.function(gpu=GPU, timeout=40 * 60)
+def wkv_throughput() -> None:
+    """Deciding experiment: chunked/parallel matmul WKV vs the production Triton
+    kernel at real shapes (C=512, T=1024/3072, B=12/24/64), bf16 then fp32."""
+    for dtype in ("bf16", "fp32"):
+        subprocess.run(
+            [
+                VENV_PY,
+                "-m",
+                "myelin.benchmarks.wkv_throughput",
+                "--device",
+                "cuda",
+                "--batches",
+                "12",
+                "24",
+                "64",
+                "--channels",
+                "512",
+                "--timesteps",
+                "1024",
+                "3072",
+                "--chunk-sizes",
+                "32",
+                "64",
+                "128",
+                "256",
+                "--dtype",
+                dtype,
+                "--repeats",
+                "20",
+            ],
+            cwd=REMOTE,
+            check=True,
+        )
