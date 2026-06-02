@@ -41,7 +41,7 @@ full-context strided eval (BPC) on the held-out last 5M bytes.
 |---|---:|---:|---|
 | **ctx-1024 (tuned)** | **1.235** | 1.283 | batch 64, lr `2e-3`, ~9h — beats the paper |
 | ctx-1024 (batch-12 repro) | 1.281 | 1.283 | full ~10B-token budget, ~15h — a match |
-| **ctx-3072 (headline)** | **1.254** | 1.262 | batch 24, lr `8e-4`, ctx 3072 — beats the paper |
+| **ctx-3072 (headline)** | **1.239** | 1.262 | batch 24, lr `8e-4`, ctx 3072 — beats the paper |
 
 The tuned ctx-1024 run is both **faster and better** than the faithful batch-12
 reproduction (a larger batch with a correspondingly larger LR finds a better

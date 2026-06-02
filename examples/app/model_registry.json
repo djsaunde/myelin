@@ -1,10 +1,10 @@
 [
   {
     "name": "SpikeGPT enwik8 — ctx-3072 (headline, beats paper)",
-    "path": "runs/spikegpt_enwik8_12L512d_ctx3072.step70k.bak.pt",
+    "path": "runs/spikegpt_enwik8_12L512d_ctx3072.final139k.pt",
     "dataset": "enwik8 (byte-level)",
-    "metric": "test BPC 1.254 (strided, full-context)",
-    "blurb": "ctx-3072 / batch-24 / lr-8e-4 run. Beats the paper's headline ctx-3072 result (1.262) — from a checkpoint at only ~57% of the planned budget."
+    "metric": "test BPC 1.239 (strided, full-context)",
+    "blurb": "ctx-3072 / batch-24 / lr-8e-4, full 139k-step run. Beats the paper's headline ctx-3072 result (1.262). This is the FINAL (unselected) checkpoint, so the number carries no checkpoint-selection bias — and it beat the noisy-val 'best' (1.251)."
   },
   {
     "name": "SpikeGPT enwik8 — ctx-1024 best (batch-64 fast)",
