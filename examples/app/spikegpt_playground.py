@@ -172,12 +172,12 @@ if st.button("Generate", type="primary"):
         help="Fraction of neurons firing — sparsity is the point of an SNN.",
     )
     s3.metric(
-        "Dead / saturated",
-        f"{dead_total} / {sat_total}  of  {block_neurons:,}",
+        "Dead / saturated / total",
+        f"{dead_total} / {sat_total} / {block_neurons:,}",
         f"{unhealthy_pct:.1f}% unhealthy",
         delta_color="inverse",
         help="Block neurons that never fire / fire on (nearly) every token in this "
-        "sample, against the total number of block neurons (2 LIF populations × "
+        "sample / total block neurons (2 LIF populations × "
         f"{config.n_layer} layers × {config.n_embd} channels).",
     )
 
