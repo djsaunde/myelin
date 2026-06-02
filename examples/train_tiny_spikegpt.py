@@ -33,6 +33,7 @@ from myelin import (
     SpikeGPTConfig,
     SpikeLanguageModel,
     evaluate_language_model,
+    evaluate_language_model_strided,
     load_spike_language_checkpoint,
     sample_token_batch,
     save_spike_language_checkpoint,
@@ -246,6 +247,37 @@ def main() -> None:
     parser.add_argument("--eval-every", type=int, default=25)
     parser.add_argument("--eval-batches", type=int, default=8)
     parser.add_argument(
+        "--val-eval",
+        choices=("strided", "random"),
+        default="strided",
+        help=(
+            "in-loop validation metric driving the log and best-checkpoint "
+            "selection. 'strided' (default) is the deterministic full-context BPC "
+            "over the whole val set (no sampling noise; matches the final eval). "
+            "'random' is the legacy noisy random-window subsample (--eval-batches)."
+        ),
+    )
+    parser.add_argument(
+        "--val-eval-count-last",
+        type=int,
+        default=0,
+        help=(
+            "for --val-eval strided: score only the last N targets of each window "
+            "(full-context BPC), stride matched to N. 0 (default) uses "
+            "context_length // 4, matching evaluate_spikegpt_checkpoint.py."
+        ),
+    )
+    parser.add_argument(
+        "--val-eval-tokens",
+        type=int,
+        default=0,
+        help=(
+            "for --val-eval strided: cap the in-loop eval to the first N val "
+            "tokens (deterministic prefix) to bound cost. 0 (default) uses the "
+            "whole val set."
+        ),
+    )
+    parser.add_argument(
         "--compile-warmup",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -417,6 +449,7 @@ def main() -> None:
         f"grad_clip:{args.grad_clip},"
         f"lr_schedule:{args.lr_schedule},{wsd_cfg}"
         f"amp:{args.amp},matmul_precision:{args.matmul_precision},"
+        f"val_eval:{args.val_eval},"
         f"compile_warmup:{args.compile_warmup},"
         f"spike_embedding:{config.spike_embedding},"
         f"activation_checkpointing:{actual_activation_checkpointing},"
@@ -639,14 +672,31 @@ def main() -> None:
                     block_rates = [value for key, value in rates.items() if key != "embedding"]
                     mean_block_rate = sum(block_rates) / len(block_rates) if block_rates else 0.0
                     mark_compiled_invocation_boundary(compile_model)
-                    eval_metrics = evaluate_language_model(
-                        raw_model,
-                        val_tokens,
-                        batch_size=args.batch,
-                        context_length=config.context_length,
-                        device=args.device,
-                        batches=args.eval_batches,
-                    )
+                    if args.val_eval == "strided":
+                        count_last = args.val_eval_count_last or config.context_length // 4
+                        eval_slice = (
+                            val_tokens[: args.val_eval_tokens]
+                            if args.val_eval_tokens > 0
+                            else val_tokens
+                        )
+                        eval_metrics = evaluate_language_model_strided(
+                            raw_model,
+                            eval_slice,
+                            batch_size=args.batch,
+                            context_length=config.context_length,
+                            device=args.device,
+                            stride=count_last,
+                            count_last=count_last,
+                        )
+                    else:
+                        eval_metrics = evaluate_language_model(
+                            raw_model,
+                            val_tokens,
+                            batch_size=args.batch,
+                            context_length=config.context_length,
+                            device=args.device,
+                            batches=args.eval_batches,
+                        )
                 emb_rate_str = "" if rates is None else f"{rates['embedding']:.4f}"
                 block_rate_str = "" if mean_block_rate is None else f"{mean_block_rate:.4f}"
                 print(
