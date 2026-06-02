@@ -461,6 +461,54 @@ def split_token_sequence(
     return tokens[:-validation_count], tokens[-validation_count:]
 
 
+def split_train_val_test(
+    tokens: torch.Tensor,
+    *,
+    validation_fraction: float,
+    min_validation_tokens: int,
+    test_fraction: float = 0.0,
+    test_tokens: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Three-way tail split: train (head) / val (middle) / test (last tail).
+
+    The **test** tail is held out *first*, so it is never trained on nor used for
+    checkpoint selection; the remainder is then split into train (head) and val
+    (tail) by :func:`split_token_sequence`. This is the clean enwik8 protocol
+    (e.g. 90M / 5M / 5M) where the reported test number comes from data the model
+    neither trained on nor was selected against.
+
+    ``test_tokens`` overrides ``test_fraction`` when positive. With no test
+    holdout the behaviour matches :func:`split_token_sequence` and the returned
+    ``test`` tensor is empty.
+    """
+    if tokens.ndim != 1:
+        raise ValueError(f"tokens must be one-dimensional; got {tokens.shape}")
+    if test_fraction < 0.0 or test_fraction >= 1.0:
+        raise ValueError("test_fraction must be in [0, 1)")
+    if test_tokens < 0:
+        raise ValueError("test_tokens must be non-negative")
+
+    test_count = test_tokens if test_tokens > 0 else int(tokens.numel() * test_fraction)
+    # Leave at least 3 tokens for the train/val split of the remainder.
+    test_count = max(0, min(test_count, tokens.numel() - 3))
+    if test_count == 0:
+        train_tokens, val_tokens = split_token_sequence(
+            tokens,
+            validation_fraction=validation_fraction,
+            min_validation_tokens=min_validation_tokens,
+        )
+        return train_tokens, val_tokens, tokens[:0]
+
+    test_split = tokens[-test_count:]
+    remainder = tokens[:-test_count]
+    train_tokens, val_tokens = split_token_sequence(
+        remainder,
+        validation_fraction=validation_fraction,
+        min_validation_tokens=min_validation_tokens,
+    )
+    return train_tokens, val_tokens, test_split
+
+
 def sample_token_batch(
     tokens: torch.Tensor,
     *,

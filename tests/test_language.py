@@ -23,6 +23,7 @@ from myelin import (
     spikegpt_config_from_preset,
     spikegpt_config_to_dict,
     split_token_sequence,
+    split_train_val_test,
     weighted_key_value,
 )
 
@@ -160,6 +161,46 @@ def test_split_token_sequence_and_sample_batch() -> None:
     assert val_tokens.tolist() == list(range(15, 20))
     assert inputs.shape == (4, 3)
     assert targets.shape == (4, 3)
+
+
+def test_split_train_val_test_holds_out_test_tail_first() -> None:
+    # 100 tokens -> test = last 10 (held out first), then val = last 5 of the
+    # remaining 90, train = first 85. The three splits are contiguous, disjoint,
+    # and cover the whole sequence with the test tail never overlapping val/train.
+    tokens = torch.arange(100)
+
+    train_tokens, val_tokens, test_tokens = split_train_val_test(
+        tokens,
+        validation_fraction=0.0,
+        min_validation_tokens=5,
+        test_tokens=10,
+    )
+
+    assert train_tokens.tolist() == list(range(85))
+    assert val_tokens.tolist() == list(range(85, 90))
+    assert test_tokens.tolist() == list(range(90, 100))
+    # The held-out test tail is disjoint from both train and val.
+    assert set(test_tokens.tolist()).isdisjoint(train_tokens.tolist())
+    assert set(test_tokens.tolist()).isdisjoint(val_tokens.tolist())
+
+
+def test_split_train_val_test_without_test_matches_two_way_split() -> None:
+    # test_fraction=0 reproduces split_token_sequence (val IS the tail) and
+    # returns an empty test tensor, so the new path is backward compatible.
+    tokens = torch.arange(20)
+
+    train_tokens, val_tokens, test_tokens = split_train_val_test(
+        tokens,
+        validation_fraction=0.25,
+        min_validation_tokens=3,
+    )
+    ref_train, ref_val = split_token_sequence(
+        tokens, validation_fraction=0.25, min_validation_tokens=3
+    )
+
+    assert train_tokens.tolist() == ref_train.tolist()
+    assert val_tokens.tolist() == ref_val.tolist()
+    assert test_tokens.numel() == 0
 
 
 def test_spiking_sequence_lif_is_binary_in_hard_forward_and_has_gradients() -> None:

@@ -139,6 +139,7 @@ from myelin.language import (
     spikegpt_config_from_preset,
     spikegpt_config_to_dict,
     split_token_sequence,
+    split_train_val_test,
     weighted_key_value,
     weighted_key_value_loop,
 )
@@ -359,6 +360,7 @@ __all__ = [
     "sigmoid_surrogate_derivative_expr",
     "spike_rate_loss",
     "split_token_sequence",
+    "split_train_val_test",
     "spikegpt_config_from_dict",
     "spikegpt_config_from_preset",
     "spikegpt_config_to_dict",

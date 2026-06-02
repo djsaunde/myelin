@@ -37,7 +37,7 @@ from myelin import (
     sample_token_batch,
     save_spike_language_checkpoint,
     spikegpt_config_from_preset,
-    split_token_sequence,
+    split_train_val_test,
 )
 
 DEFAULT_TEXT = (
@@ -156,6 +156,24 @@ def main() -> None:
     )
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--min-val-tokens", type=int, default=64)
+    parser.add_argument(
+        "--test-fraction",
+        type=float,
+        default=0.0,
+        help=(
+            "hold out this fraction of the corpus as a test tail FIRST (never "
+            "trained on nor used for checkpoint selection); the remainder is then "
+            "split into train/val. Use with --test-tokens for the clean 3-way "
+            "enwik8 split (e.g. 90M/5M/5M). 0 keeps the legacy train/val-only split "
+            "where val IS the held-out tail."
+        ),
+    )
+    parser.add_argument(
+        "--test-tokens",
+        type=int,
+        default=0,
+        help="explicit test-tail token count; overrides --test-fraction when > 0",
+    )
     parser.add_argument(
         "--preset",
         choices=("custom", *SPIKEGPT_PRESETS.keys()),
@@ -357,10 +375,12 @@ def main() -> None:
         if byte_file_mode
         else vocabulary.encode(text)
     )
-    train_tokens, val_tokens = split_token_sequence(
+    train_tokens, val_tokens, test_tokens = split_train_val_test(
         tokens,
         validation_fraction=args.val_fraction,
         min_validation_tokens=args.min_val_tokens,
+        test_fraction=args.test_fraction,
+        test_tokens=args.test_tokens,
     )
     actual_vocab = vocabulary_name(vocabulary)
     actual_activation_checkpointing = raw_model.gradient_checkpointing
@@ -402,6 +422,7 @@ def main() -> None:
         f"activation_checkpointing:{actual_activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
         f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()},"
+        f"test_tokens_heldout:{test_tokens.numel()},"
         f"previous_steps:{previous_steps},total_steps:{total_steps},"
         f"checkpoint_in:{'' if args.checkpoint_in is None else args.checkpoint_in}",
         flush=True,
@@ -473,6 +494,7 @@ def main() -> None:
             "vocab_size": vocabulary.size,
             "train_tokens": train_tokens.numel(),
             "val_tokens": val_tokens.numel(),
+            "test_tokens_heldout": test_tokens.numel(),
             "previous_steps": previous_steps,
             "total_steps": total_steps,
             "checkpoint_in": "" if args.checkpoint_in is None else str(args.checkpoint_in),
@@ -505,6 +527,7 @@ def main() -> None:
                 "seed": args.seed,
                 "train_tokens": train_tokens.numel(),
                 "val_tokens": val_tokens.numel(),
+                "test_tokens_heldout": test_tokens.numel(),
             },
             optimizer=optimizer,
         )
