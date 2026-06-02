@@ -51,21 +51,28 @@ we beat 1.262 as well.
 Honest caveats: we use a **stabilized recipe** (cosine LR decay, weight decay
 `0.1`, bf16) rather than the paper's literal `6e-4` / `wd 0`, because the literal
 recipe **diverges** in our setup (LR too high — the iterate diffuses out of the
-minimum); training uses the first 95M bytes (vs the standard 90M), last 5M held
-out for test either way; bf16 (WKV recurrence and LIF membrane kept in fp32) was
+minimum). The recipe above uses the standard **disjoint** enwik8 split — train
+(first 90M), val (90–95M) for checkpoint selection, test (last 5M,
+`data/enwik8_test`) for the test BPC — with the deterministic full-context
+strided eval driving selection, so a run of this recipe yields a genuinely
+held-out, selection-noise-free number. bf16 (WKV recurrence and LIF membrane kept in fp32) was
 validated to track fp32 and gives ~1.6x step-time under `torch.compile`. The WKV
 recurrence runs through a fused Triton custom op on CUDA (a sequential-over-time
 kernel; benchmarked ~5-9x faster than chunked/parallel matmul forms — see
 [benchmarks/results/wkv_throughput_rtxpro6000.md](benchmarks/results/wkv_throughput_rtxpro6000.md)).
 
 ```bash
-# train the tuned ctx-1024 model (best test BPC, ~9h on one 5090)
+# train the tuned ctx-1024 model (best test BPC, ~9h on one 5090).
+# Clean disjoint split: train 0-90M, val 90-95M (drives selection), test 95-100M.
+# Selection uses the deterministic full-context strided eval (--val-eval strided,
+# the default) over the whole val set, so there is no sampling noise.
 uv run --extra tracking python examples/train_tiny_spikegpt.py \
   --text-file data/enwik8 --vocab byte --context-length 1024 --layers 12 --embedding 512 \
+  --test-tokens 5000000 --min-val-tokens 5000000 --val-fraction 0.0 \
   --batch 64 --steps 156000 --lr 2e-3 --lr-final 1e-5 --warmup-steps 2000 \
   --weight-decay 0.1 --dropout 0.03 --amp bf16 --compile regional \
   --best-checkpoint-out runs/enwik8_fast.best.pt
-# evaluate (full-context BPC by default)
+# evaluate on the untouched test tail (full-context BPC by default)
 uv run python examples/evaluate_spikegpt_checkpoint.py runs/enwik8_fast.best.pt \
   --text-file data/enwik8_test --no-sample
 ```
