@@ -19,7 +19,7 @@ from typing import cast
 import streamlit as st
 import torch
 
-from myelin import SamplingMode, load_spike_language_checkpoint
+from myelin import SamplingMode, collect_spike_statistics, load_spike_language_checkpoint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().parent / "model_registry.json"
@@ -98,6 +98,15 @@ with st.sidebar:
     seed = st.number_input("Seed", value=0, step=1)
     use_cache = st.checkbox("Use recurrent cache (faster)", value=True)
 
+    st.header("Display")
+    render_entities = st.checkbox(
+        "Render Wikipedia entities",
+        value=True,
+        help="enwik8 stores quotes/brackets as HTML entities (&quot;, &lt;, …). "
+        "Decode them to readable characters in the generation panel. The per-byte "
+        "surprisal heatmap below always shows the raw bytes the model produced.",
+    )
+
 model, vocab, metadata, config, n_params = load_model(entry["path"], device)
 
 c1, c2, c3, c4 = st.columns(4)
@@ -128,26 +137,70 @@ if st.button("Generate", type="primary"):
     plen = prompt_ids.shape[1]
     continuation = vocab.decode(out[0, plen:].cpu())
 
+    # Optionally decode enwik8's HTML entities (&quot;, &lt;, …) for readability.
+    # The model emits them verbatim from the corpus; the surprisal heatmap below
+    # stays on raw bytes so it keeps matching the actual token stream.
+    show_prompt = html.unescape(prompt) if render_entities else prompt
+    show_cont = html.unescape(continuation) if render_entities else continuation
+
     st.subheader("Generation")
     st.markdown(
         f"<div style='font-family:monospace;white-space:pre-wrap;border:1px solid #ddd;"
         f"padding:10px;border-radius:6px'>"
-        f"<span style='color:#888'>{html.escape(prompt)}</span>"
-        f"<span style='font-weight:600'>{html.escape(continuation)}</span></div>",
+        f"<span style='color:#888'>{html.escape(show_prompt)}</span>"
+        f"<span style='font-weight:600'>{html.escape(show_cont)}</span></div>",
         unsafe_allow_html=True,
     )
 
-    # SNN-distinctive readout: spike sparsity over the generated sequence
-    rates = model.spike_rates(out)
-    block_rates = [v for k, v in rates.items() if k != "embedding"]
-    mean_block = sum(block_rates) / len(block_rates) if block_rates else 0.0
-    s1, s2 = st.columns(2)
-    s1.metric("Embedding spike rate", f"{rates['embedding'] * 100:.1f}%")
+    # SNN-distinctive readout: spike statistics over the generated sequence.
+    stats = collect_spike_statistics(
+        model, out[0].cpu(), context_length=out.shape[1], batch_size=1, max_windows=1
+    )
+    pops = stats.populations
+    block_pops = [p for k, p in pops.items() if k != "embedding"]
+    mean_block = sum(p.density for p in block_pops) / len(block_pops) if block_pops else 0.0
+    dead_total = sum(p.dead_count for p in block_pops)
+    sat_total = sum(p.saturated_count for p in block_pops)
+    s1, s2, s3 = st.columns(3)
+    emb = pops["embedding"].density if "embedding" in pops else float("nan")
+    s1.metric("Embedding spike rate", f"{emb * 100:.1f}%")
     s2.metric(
         "Mean block spike rate",
         f"{mean_block * 100:.1f}%",
         help="Fraction of neurons firing — sparsity is the point of an SNN.",
     )
+    s3.metric(
+        "Dead / saturated (block neurons)",
+        f"{dead_total} / {sat_total}",
+        help="Neurons that never fire / fire on (nearly) every token in this sample.",
+    )
+
+    with st.expander("Spiking analysis — per-layer, per-position, neuron health"):
+        profile = stats.per_layer_profile()
+        if profile:
+            st.caption("Firing density by depth (fraction of neurons firing per step)")
+            st.bar_chart(
+                {
+                    "time (lif1)": [t for _, t, _ in profile],
+                    "channel (lif2)": [c for _, _, c in profile],
+                }
+            )
+        st.caption("Firing density by token position in the sequence")
+        total_ch = sum(p.num_channels for p in pops.values())
+        mean_pos = [
+            sum(p.per_position_rate[t].item() * p.num_channels for p in pops.values()) / total_ch
+            for t in range(stats.context_length)
+        ]
+        st.line_chart(mean_pos)
+        st.caption("Per-population density and neuron health")
+        st.table(
+            {
+                "population": list(pops),
+                "density %": [f"{p.density * 100:.1f}" for p in pops.values()],
+                "dead": [p.dead_count for p in pops.values()],
+                "saturated": [p.saturated_count for p in pops.values()],
+            }
+        )
 
     # per-byte surprisal heatmap over the continuation
     st.subheader("Per-byte surprisal (bits) — green = confident, red = surprised")

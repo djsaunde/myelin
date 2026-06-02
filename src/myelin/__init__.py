@@ -196,6 +196,14 @@ from myelin.packing import (
     spike_compression_ratio,
     unpack_spikes,
 )
+from myelin.spike_statistics import (
+    PopulationSpikeStats,
+    SpikeStatistics,
+    SpikingFractionReport,
+    collect_spike_statistics,
+    compute_spiking_fraction,
+    format_spike_report,
+)
 from myelin.surrogates import (
     SURROGATE_NAMES,
     atan_surrogate,
@@ -272,8 +280,11 @@ __all__ = [
     "SpikeTimeMix",
     "SpikeTimeMixState",
     "SpiNNaker2DenseLIFManifest",
+    "SpikingFractionReport",
     "SpikingSequenceLIF",
     "SpikingSequenceLIFState",
+    "SpikeStatistics",
+    "PopulationSpikeStats",
     "SurrogateBuilder",
     "SurrogateDenseLIF",
     "SurrogateALIFCell",
@@ -356,6 +367,9 @@ __all__ = [
     "read_spinnaker2_dense_lif_manifest",
     "sample_token_batch",
     "save_spike_language_checkpoint",
+    "collect_spike_statistics",
+    "compute_spiking_fraction",
+    "format_spike_report",
     "sigmoid_surrogate",
     "sigmoid_surrogate_derivative_expr",
     "spike_rate_loss",
