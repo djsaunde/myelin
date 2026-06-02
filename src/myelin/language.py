@@ -147,6 +147,10 @@ class BPEVocabulary:
             raise ValueError("text must not be empty")
         return torch.tensor(self._tokenizer.encode(text).ids, dtype=torch.long)
 
+    def encode_batch(self, texts: list[str]) -> list[list[int]]:
+        """Encode many texts at once (the Rust tokenizer parallelizes across cores)."""
+        return [encoding.ids for encoding in self._tokenizer.encode_batch(texts)]
+
     def decode(self, token_ids: torch.Tensor) -> str:
         return self._tokenizer.decode(token_ids.detach().cpu().tolist())
 

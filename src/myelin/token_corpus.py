@@ -86,6 +86,20 @@ class TokenCorpusWriter:
         self._handle.write(array.tobytes())
         self.n_tokens += int(array.size)
 
+    def flush_sidecar(self) -> None:
+        """Flush the .bin and (re)write the .json for the current token count.
+
+        Calling this periodically makes a partially-written corpus usable even if
+        the producer (e.g. a streaming HF dataset) dies mid-run — the sidecar
+        always describes a valid prefix of the .bin.
+        """
+        self._handle.flush()
+        self.path.with_suffix(".json").write_text(
+            json.dumps(
+                {"n_tokens": self.n_tokens, "vocab_size": self.vocab_size, "dtype": self.dtype.name}
+            )
+        )
+
     def close(self) -> None:
         self._handle.close()
         self.path.with_suffix(".json").write_text(
