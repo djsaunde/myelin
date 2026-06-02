@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from os import PathLike
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, Protocol, TypeAlias, cast
 
 import torch
 from torch import nn
@@ -558,14 +558,30 @@ def split_train_val_test(
     return train_tokens, val_tokens, test_split
 
 
+class TokenSource(Protocol):
+    """Anything that can serve token windows by slicing (a ``torch.Tensor`` or a
+    memory-mapped corpus). ``__getitem__`` of an int slice returns a 1-D long
+    tensor; ``numel`` is the total token count."""
+
+    def numel(self) -> int: ...
+
+    def __getitem__(self, index: slice) -> torch.Tensor: ...
+
+
 def sample_token_batch(
-    tokens: torch.Tensor,
+    tokens: torch.Tensor | TokenSource,
     *,
     batch_size: int,
     context_length: int,
     device: str | torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample random next-token prediction windows from a token sequence."""
+    """Sample random next-token prediction windows from a token sequence.
+
+    ``tokens`` may be an in-memory ``torch.Tensor`` or a memmap-backed
+    :class:`~myelin.token_corpus.MemmapTokenCorpus` (anything matching
+    :class:`TokenSource`), so the same IID random-window sampler drives both the
+    small enwik8 runs and OpenWebText2-scale corpora.
+    """
 
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
@@ -574,7 +590,7 @@ def sample_token_batch(
     max_start = tokens.numel() - context_length - 1
     if max_start <= 0:
         raise ValueError("tokens are too short for the requested context length")
-    starts = torch.randint(0, max_start, (batch_size,))
+    starts = torch.randint(0, max_start, (batch_size,)).tolist()
     inputs = torch.stack([tokens[start : start + context_length] for start in starts])
     targets = torch.stack([tokens[start + 1 : start + context_length + 1] for start in starts])
     return inputs.to(device=device), targets.to(device=device)
@@ -583,7 +599,7 @@ def sample_token_batch(
 @torch.no_grad()
 def evaluate_language_model(
     model: nn.Module,
-    tokens: torch.Tensor,
+    tokens: torch.Tensor | TokenSource,
     *,
     batch_size: int,
     context_length: int,
@@ -627,7 +643,7 @@ def evaluate_language_model(
 @torch.no_grad()
 def evaluate_language_model_strided(
     model: nn.Module,
-    tokens: torch.Tensor,
+    tokens: torch.Tensor | TokenSource,
     *,
     batch_size: int,
     context_length: int,
@@ -648,7 +664,7 @@ def evaluate_language_model_strided(
     corpus exactly once.
     """
 
-    if tokens.ndim != 1:
+    if isinstance(tokens, torch.Tensor) and tokens.ndim != 1:
         raise ValueError(f"tokens must be one-dimensional; got {tokens.shape}")
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")

@@ -31,6 +31,7 @@ from myelin import (
     ByteVocabulary,
     CharacterVocabulary,
     LanguageVocabulary,
+    MemmapTokenCorpus,
     SpikeGPTConfig,
     SpikeLanguageModel,
     evaluate_language_model,
@@ -152,6 +153,14 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--text", default=DEFAULT_TEXT)
     parser.add_argument("--text-file", type=Path)
+    parser.add_argument(
+        "--train-bin",
+        type=Path,
+        help="pre-tokenized uint16 corpus (memmap) for train; bypasses text read + split. "
+        "Use with --vocab bpe/byte and a corpus from examples/prepare_token_corpus.py.",
+    )
+    parser.add_argument("--val-bin", type=Path, help="pre-tokenized val corpus (memmap)")
+    parser.add_argument("--test-bin", type=Path, help="pre-tokenized test corpus (memmap)")
     parser.add_argument(
         "--vocab",
         choices=("char", "byte", "bpe"),
@@ -359,18 +368,22 @@ def main() -> None:
     # enwik8 and other byte-level corpora contain raw bytes that are not valid
     # UTF-8, so read them as bytes when using the byte vocabulary; otherwise read
     # UTF-8 text.
-    byte_file_mode = args.text_file is not None and args.vocab == "byte"
+    use_bins = args.train_bin is not None
+    byte_file_mode = (not use_bins) and args.text_file is not None and args.vocab == "byte"
     raw_bytes: bytes = b""
-    if byte_file_mode:
-        assert args.text_file is not None
-        raw_bytes = args.text_file.read_bytes()
-        if not raw_bytes:
-            raise ValueError("text file is empty")
-        text = ""
-    else:
-        text = (
-            args.text_file.read_text(encoding="utf-8") if args.text_file is not None else args.text
-        )
+    text = ""
+    if not use_bins:
+        if byte_file_mode:
+            assert args.text_file is not None
+            raw_bytes = args.text_file.read_bytes()
+            if not raw_bytes:
+                raise ValueError("text file is empty")
+        else:
+            text = (
+                args.text_file.read_text(encoding="utf-8")
+                if args.text_file is not None
+                else args.text
+            )
     checkpoint = (
         load_spike_language_checkpoint(args.checkpoint_in, map_location=args.device)
         if args.checkpoint_in is not None
@@ -378,6 +391,8 @@ def main() -> None:
     )
     if checkpoint is None:
         if args.vocab == "char":
+            if use_bins:
+                raise ValueError("--vocab char is unsupported with --train-bin; use bpe or byte")
             vocabulary = CharacterVocabulary.from_text(text)
         elif args.vocab == "byte":
             vocabulary = ByteVocabulary()
@@ -413,18 +428,35 @@ def main() -> None:
         config = checkpoint.model.config
         raw_model = checkpoint.model.to(device=args.device)
         checkpoint_metadata = checkpoint.metadata
-    tokens = (
-        torch.frombuffer(bytearray(raw_bytes), dtype=torch.uint8).to(torch.long)
-        if byte_file_mode
-        else vocabulary.encode(text)
-    )
-    train_tokens, val_tokens, test_tokens = split_train_val_test(
-        tokens,
-        validation_fraction=args.val_fraction,
-        min_validation_tokens=args.min_val_tokens,
-        test_fraction=args.test_fraction,
-        test_tokens=args.test_tokens,
-    )
+    if use_bins:
+        assert args.train_bin is not None
+        train_tokens: torch.Tensor | MemmapTokenCorpus = MemmapTokenCorpus.open(args.train_bin)
+        if train_tokens.vocab_size != vocabulary.size:
+            raise ValueError(
+                f"--train-bin vocab_size {train_tokens.vocab_size} != model vocab "
+                f"{vocabulary.size}; tokenize with the matching --bpe-tokenizer/--vocab"
+            )
+        val_tokens: torch.Tensor | MemmapTokenCorpus = (
+            MemmapTokenCorpus.open(args.val_bin) if args.val_bin is not None else train_tokens
+        )
+        test_tokens: torch.Tensor | MemmapTokenCorpus = (
+            MemmapTokenCorpus.open(args.test_bin)
+            if args.test_bin is not None
+            else torch.empty(0, dtype=torch.long)
+        )
+    else:
+        tokens = (
+            torch.frombuffer(bytearray(raw_bytes), dtype=torch.uint8).to(torch.long)
+            if byte_file_mode
+            else vocabulary.encode(text)
+        )
+        train_tokens, val_tokens, test_tokens = split_train_val_test(
+            tokens,
+            validation_fraction=args.val_fraction,
+            min_validation_tokens=args.min_val_tokens,
+            test_fraction=args.test_fraction,
+            test_tokens=args.test_tokens,
+        )
     actual_vocab = vocabulary_name(vocabulary)
     actual_activation_checkpointing = raw_model.gradient_checkpointing
     # "previous_steps" records the global steps actually completed (set on every
