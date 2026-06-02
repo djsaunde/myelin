@@ -9,6 +9,7 @@ import torch
 
 from myelin import (
     ByteVocabulary,
+    MemmapTokenCorpus,
     evaluate_language_model,
     evaluate_language_model_strided,
     load_spike_language_checkpoint,
@@ -21,6 +22,12 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--text")
     parser.add_argument("--text-file", type=Path)
+    parser.add_argument(
+        "--tokens-bin",
+        type=Path,
+        help="pre-tokenized uint16 corpus (memmap) to evaluate, e.g. a WikiText test "
+        "split from prepare_token_corpus.py; reports token-level perplexity",
+    )
     parser.add_argument("--eval-batches", type=int, default=8)
     parser.add_argument("--eval-stride", type=int)
     parser.add_argument(
@@ -76,7 +83,11 @@ def main() -> None:
     if checkpoint.metadata:
         print(f"checkpoint_metadata={checkpoint.metadata}", flush=True)
 
-    if args.text_file is not None and isinstance(vocabulary, ByteVocabulary):
+    eval_tokens: torch.Tensor | MemmapTokenCorpus | None
+    if args.tokens_bin is not None:
+        # Pre-tokenized corpus (e.g. WikiText test split): evaluate directly.
+        eval_tokens = MemmapTokenCorpus.open(args.tokens_bin)
+    elif args.text_file is not None and isinstance(vocabulary, ByteVocabulary):
         # Byte-level corpus (e.g. enwik8): read raw bytes, not UTF-8 text.
         eval_tokens = torch.frombuffer(
             bytearray(args.text_file.read_bytes()), dtype=torch.uint8
