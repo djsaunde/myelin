@@ -9,7 +9,7 @@ specialize the WKV recurrence or spike operators.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass
 from os import PathLike
 from typing import Any, Literal, TypeAlias, cast
@@ -1265,6 +1265,59 @@ class SpikeLanguageModel(nn.Module):
         if was_training:
             self.train()
         return output
+
+    def generate_stream(
+        self,
+        input_ids: torch.Tensor,
+        *,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        sampling: SamplingMode = "multinomial",
+    ) -> Iterator[torch.Tensor]:
+        """Yield generated tokens one at a time via the recurrent cached path.
+
+        Yields one ``[B, 1]`` token tensor per step (``max_new_tokens`` total),
+        sampled exactly as :meth:`generate` with ``use_cache=True``. ``no_grad`` is
+        applied inside the body (a ``@torch.no_grad()`` decorator would not cover a
+        generator's lazily-executed yields).
+        """
+        if max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be non-negative")
+        if temperature <= 0.0:
+            raise ValueError("temperature must be positive")
+        if top_k is not None and top_k <= 0:
+            raise ValueError("top_k must be positive when provided")
+        if sampling not in ("multinomial", "greedy"):
+            raise ValueError("sampling must be 'multinomial' or 'greedy'")
+        if input_ids.ndim != 2:
+            raise ValueError(f"input_ids must have shape [B, T]; got {input_ids.shape}")
+        if input_ids.shape[1] == 0:
+            raise ValueError("input_ids must contain at least one context token")
+
+        was_training = self.training
+        self.eval()
+        try:
+            with torch.no_grad():
+                state = self.initial_state(
+                    batch_size=input_ids.shape[0],
+                    device=input_ids.device,
+                    dtype=self.embedding.weight.dtype,
+                )
+                logits: torch.Tensor | None = None
+                for step in range(input_ids.shape[1]):
+                    logits, state = self.forward_step(input_ids[:, step], state)
+                for _ in range(max_new_tokens):
+                    if logits is None:
+                        raise RuntimeError("generate_stream requires at least one context token")
+                    next_token = _sample_next_token(
+                        logits, temperature=temperature, top_k=top_k, sampling=sampling
+                    )
+                    yield next_token
+                    logits, state = self.forward_step(next_token[:, 0], state)
+        finally:
+            if was_training:
+                self.train()
 
     @torch.no_grad()
     def spike_rates(self, input_ids: torch.Tensor) -> dict[str, float]:

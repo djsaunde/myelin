@@ -430,6 +430,25 @@ def test_cached_and_uncached_greedy_generation_match_within_context_window() -> 
     assert torch.equal(cached, uncached)
 
 
+def test_generate_stream_matches_cached_generate_greedy() -> None:
+    torch.manual_seed(0)
+    config = SpikeGPTConfig(
+        vocab_size=7, context_length=8, n_layer=1, n_embd=8, dropout=0.0, lif_threshold=0.0
+    )
+    model = SpikeLanguageModel(config)
+    input_ids = torch.tensor([[0, 1, 2]])
+
+    full = model.generate(input_ids, max_new_tokens=4, sampling="greedy", use_cache=True)
+    model.eval()
+    streamed = list(model.generate_stream(input_ids, max_new_tokens=4, sampling="greedy"))
+
+    assert len(streamed) == 4
+    assert all(tok.shape == (1, 1) for tok in streamed)
+    assert torch.equal(torch.cat([input_ids, *streamed], dim=1), full)
+    # generate_stream restores the prior mode (eval here) after iterating.
+    assert model.training is False
+
+
 def test_ffn_pre_cached_and_uncached_greedy_generation_match() -> None:
     torch.manual_seed(0)
     config = SpikeGPTConfig(
