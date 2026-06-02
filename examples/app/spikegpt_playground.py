@@ -20,7 +20,13 @@ from typing import cast
 import streamlit as st
 import torch
 
-from myelin import SamplingMode, collect_spike_statistics, load_spike_language_checkpoint
+from myelin import (
+    ByteVocabulary,
+    CharacterVocabulary,
+    SamplingMode,
+    collect_spike_statistics,
+    load_spike_language_checkpoint,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().parent / "model_registry.json"
@@ -207,10 +213,19 @@ if st.button("Generate", type="primary"):
         f"{ttft * 1000:.0f} ms",
         help="Prompt prefill + first decoded token, on the selected device.",
     )
+    # Byte-level models step one byte per token; char-level one char. Name the
+    # unit precisely (a multi-byte UTF-8 char is several byte-tokens, so for a
+    # byte model "chars/s" would be wrong); fall back to the generic "tokens".
+    if isinstance(vocab, ByteVocabulary):
+        unit = "bytes"
+    elif isinstance(vocab, CharacterVocabulary):
+        unit = "chars"
+    else:
+        unit = "tokens"
     p2.metric(
         "Throughput",
-        f"{tokens_per_s:.1f} tok/s",
-        help=f"{len(token_tensors)} tokens / {gen_time:.2f}s end-to-end on {device}.",
+        f"{tokens_per_s:.1f} {unit}/s",
+        help=f"{len(token_tensors)} {unit} / {gen_time:.2f}s end-to-end on {device}.",
     )
     p3.metric("Total generation", f"{gen_time:.2f} s")
 
