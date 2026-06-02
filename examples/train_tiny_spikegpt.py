@@ -27,6 +27,7 @@ from example_utils import (
 
 from myelin import (
     SPIKEGPT_PRESETS,
+    BPEVocabulary,
     ByteVocabulary,
     CharacterVocabulary,
     LanguageVocabulary,
@@ -50,6 +51,8 @@ DEFAULT_TEXT = (
 def vocabulary_name(vocabulary: LanguageVocabulary) -> str:
     if isinstance(vocabulary, ByteVocabulary):
         return "byte"
+    if isinstance(vocabulary, BPEVocabulary):
+        return "bpe"
     return "char"
 
 
@@ -151,9 +154,14 @@ def main() -> None:
     parser.add_argument("--text-file", type=Path)
     parser.add_argument(
         "--vocab",
-        choices=("char", "byte"),
+        choices=("char", "byte", "bpe"),
         default="char",
-        help="tokenization mode; byte uses a fixed 256-token UTF-8 vocabulary",
+        help="tokenization mode; byte=256-token UTF-8, bpe=subword (--bpe-tokenizer)",
+    )
+    parser.add_argument(
+        "--bpe-tokenizer",
+        default="EleutherAI/gpt-neox-20b",
+        help="HuggingFace tokenizer for --vocab bpe (downloaded once, stored in the checkpoint)",
     )
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--min-val-tokens", type=int, default=64)
@@ -369,9 +377,12 @@ def main() -> None:
         else None
     )
     if checkpoint is None:
-        vocabulary = (
-            CharacterVocabulary.from_text(text) if args.vocab == "char" else ByteVocabulary()
-        )
+        if args.vocab == "char":
+            vocabulary = CharacterVocabulary.from_text(text)
+        elif args.vocab == "byte":
+            vocabulary = ByteVocabulary()
+        else:
+            vocabulary = BPEVocabulary.from_pretrained(args.bpe_tokenizer)
         config = (
             SpikeGPTConfig(
                 vocab_size=vocabulary.size,

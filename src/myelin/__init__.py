@@ -108,6 +108,7 @@ from myelin.kernels import (
 )
 from myelin.language import (
     SPIKEGPT_PRESETS,
+    BPEVocabulary,
     ByteVocabulary,
     CharacterVocabulary,
     LanguageEval,
@@ -220,6 +221,7 @@ __all__ = [
     "ALIFState",
     "ALIFCell",
     "BITS_PER_WORD",
+    "BPEVocabulary",
     "ByteVocabulary",
     "CharacterVocabulary",
     "CheckpointPolicy",

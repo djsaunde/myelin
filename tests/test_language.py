@@ -75,6 +75,54 @@ def test_byte_vocabulary_round_trips_utf8_and_has_fixed_size() -> None:
     assert vocab.decode(encoded) == text
 
 
+def _tiny_bpe_vocab():
+    # Train a tiny in-memory BPE tokenizer (no network) to exercise BPEVocabulary.
+    tokenizers = pytest.importorskip("tokenizers")
+    from myelin import BPEVocabulary
+
+    tokenizer = tokenizers.Tokenizer(tokenizers.models.BPE(unk_token="<unk>"))
+    tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tokenizer.decoder = tokenizers.decoders.ByteLevel()
+    trainer = tokenizers.trainers.BpeTrainer(vocab_size=200, special_tokens=["<unk>"])
+    tokenizer.train_from_iterator(
+        ["spiking neural networks", "hello world", "the quick brown fox"] * 20, trainer
+    )
+    return BPEVocabulary(tokenizer_json=tokenizer.to_str(), vocab_size=tokenizer.get_vocab_size())
+
+
+def test_bpe_vocabulary_encodes_and_serializes_round_trip() -> None:
+    from myelin.language import language_vocabulary_from_dict, language_vocabulary_to_dict
+
+    vocab = _tiny_bpe_vocab()
+    encoded = vocab.encode("hello spiking world")
+    assert encoded.dtype == torch.long
+    assert encoded.ndim == 1
+    assert int(encoded.max()) < vocab.size
+    assert isinstance(vocab.decode(encoded), str)
+
+    # Serializing and reloading reproduces an identical tokenizer (same encode).
+    restored = language_vocabulary_from_dict(language_vocabulary_to_dict(vocab))
+    assert restored.size == vocab.size
+    assert torch.equal(restored.encode("the quick brown fox"), vocab.encode("the quick brown fox"))
+
+
+def test_spike_language_checkpoint_round_trips_bpe_vocabulary(tmp_path: Path) -> None:
+    vocab = _tiny_bpe_vocab()
+    config = SpikeGPTConfig(
+        vocab_size=vocab.size, context_length=16, n_layer=1, n_embd=32, dropout=0.0
+    )
+    model = SpikeLanguageModel(config).eval()
+    path = tmp_path / "bpe_ckpt.pt"
+    save_spike_language_checkpoint(path, model, vocab)
+    loaded = load_spike_language_checkpoint(path)
+
+    from myelin import BPEVocabulary
+
+    assert isinstance(loaded.vocabulary, BPEVocabulary)
+    assert loaded.vocabulary.size == vocab.size
+    assert torch.equal(loaded.vocabulary.encode("hello world"), vocab.encode("hello world"))
+
+
 def test_language_vocabulary_serialization_round_trips() -> None:
     char_vocab = CharacterVocabulary.from_text("banana")
     byte_vocab = ByteVocabulary()
@@ -102,7 +150,7 @@ def test_spikegpt_config_from_preset_uses_named_dimensions() -> None:
         gradient_checkpointing=True,
     )
 
-    assert set(SPIKEGPT_PRESETS) == {"micro", "tiny", "small", "base"}
+    assert set(SPIKEGPT_PRESETS) == {"micro", "tiny", "small", "base", "gpt2-216m"}
     assert config.vocab_size == 257
     assert config.context_length == SPIKEGPT_PRESETS["tiny"].context_length
     assert config.n_layer == SPIKEGPT_PRESETS["tiny"].n_layer

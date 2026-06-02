@@ -10,7 +10,7 @@ specialize the WKV recurrence or spike operators.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from os import PathLike
 from typing import Any, Literal, TypeAlias, cast
 
@@ -45,7 +45,7 @@ _SURROGATE_NAME_BY_FN: dict[SurrogateFn, SurrogateName] = {
 }
 
 SpikeGPTModelType = Literal["rwkv", "rwkv-ffn-pre"]
-SpikeGPTPreset = Literal["micro", "tiny", "small", "base"]
+SpikeGPTPreset = Literal["micro", "tiny", "small", "base", "gpt2-216m"]
 SamplingMode = Literal["multinomial", "greedy"]
 
 
@@ -104,7 +104,54 @@ class ByteVocabulary:
         return bytes(values).decode("utf-8", errors="replace")
 
 
-LanguageVocabulary: TypeAlias = CharacterVocabulary | ByteVocabulary
+@dataclass(frozen=True)
+class BPEVocabulary:
+    """Subword BPE vocabulary backed by a HuggingFace ``tokenizers`` tokenizer.
+
+    Used for the SpikeGPT 216M setting (GPT-NeoX BPE, ~50k vocab). The full
+    ``tokenizer.json`` is stored inline so checkpoints are self-contained — a saved
+    model reloads its exact tokenizer with no network access. Requires the
+    ``tokenization`` extra (``tokenizers``); the import is lazy so the core package
+    does not depend on it.
+    """
+
+    tokenizer_json: str
+    vocab_size: int
+    _tokenizer: Any = field(init=False, repr=False, compare=False, default=None)
+
+    def __post_init__(self) -> None:
+        from tokenizers import Tokenizer
+
+        object.__setattr__(self, "_tokenizer", Tokenizer.from_str(self.tokenizer_json))
+
+    @classmethod
+    def from_pretrained(cls, name: str = "EleutherAI/gpt-neox-20b") -> BPEVocabulary:
+        """Build from a Hub tokenizer (downloads ``tokenizer.json`` once)."""
+        from huggingface_hub import hf_hub_download
+
+        return cls.from_tokenizer_file(hf_hub_download(name, "tokenizer.json"))
+
+    @classmethod
+    def from_tokenizer_file(cls, path: str | PathLike[str]) -> BPEVocabulary:
+        from tokenizers import Tokenizer
+
+        tokenizer = Tokenizer.from_file(str(path))
+        return cls(tokenizer_json=tokenizer.to_str(), vocab_size=tokenizer.get_vocab_size())
+
+    @property
+    def size(self) -> int:
+        return self.vocab_size
+
+    def encode(self, text: str) -> torch.Tensor:
+        if not text:
+            raise ValueError("text must not be empty")
+        return torch.tensor(self._tokenizer.encode(text).ids, dtype=torch.long)
+
+    def decode(self, token_ids: torch.Tensor) -> str:
+        return self._tokenizer.decode(token_ids.detach().cpu().tolist())
+
+
+LanguageVocabulary: TypeAlias = CharacterVocabulary | ByteVocabulary | BPEVocabulary
 
 
 @dataclass(frozen=True)
@@ -121,7 +168,7 @@ class SpikeLanguageCheckpoint:
     """Loaded SpikeGPT-style model checkpoint."""
 
     model: SpikeLanguageModel
-    vocabulary: CharacterVocabulary | ByteVocabulary
+    vocabulary: LanguageVocabulary
     metadata: dict[str, object]
     optimizer_state_dict: dict[str, Any] | None = None
 
@@ -216,6 +263,8 @@ SPIKEGPT_PRESETS: dict[SpikeGPTPreset, SpikeGPTPresetSpec] = {
     "tiny": SpikeGPTPresetSpec(context_length=64, n_layer=2, n_embd=64),
     "small": SpikeGPTPresetSpec(context_length=128, n_layer=4, n_embd=128),
     "base": SpikeGPTPresetSpec(context_length=256, n_layer=6, n_embd=256),
+    # SpikeGPT paper's 216M at-scale config (18L/768d); ~215M params at vocab 50277.
+    "gpt2-216m": SpikeGPTPresetSpec(context_length=1024, n_layer=18, n_embd=768),
 }
 
 
@@ -1410,6 +1459,12 @@ def language_vocabulary_to_dict(vocabulary: LanguageVocabulary) -> dict[str, obj
 
     if isinstance(vocabulary, ByteVocabulary):
         return {"type": "byte"}
+    if isinstance(vocabulary, BPEVocabulary):
+        return {
+            "type": "bpe",
+            "tokenizer_json": vocabulary.tokenizer_json,
+            "vocab_size": vocabulary.vocab_size,
+        }
     return {"type": "character", "tokens": list(vocabulary.tokens)}
 
 
@@ -1419,6 +1474,11 @@ def language_vocabulary_from_dict(data: Mapping[str, object]) -> LanguageVocabul
     vocabulary_type = _require_str(data.get("type"), "vocabulary.type")
     if vocabulary_type == "byte":
         return ByteVocabulary()
+    if vocabulary_type == "bpe":
+        return BPEVocabulary(
+            tokenizer_json=_require_str(data.get("tokenizer_json"), "vocabulary.tokenizer_json"),
+            vocab_size=_require_int(data.get("vocab_size"), "vocabulary.vocab_size"),
+        )
     if vocabulary_type != "character":
         raise ValueError(f"unsupported vocabulary type: {vocabulary_type}")
     raw_tokens = data.get("tokens")
