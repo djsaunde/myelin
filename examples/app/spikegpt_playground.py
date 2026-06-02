@@ -89,8 +89,11 @@ with st.sidebar:
         help="GPU may be busy with a training run; CPU is safe for short generations.",
     )
 
+    model, vocab, metadata, config, n_params = load_model(entry["path"], device)
+
     st.header("Sampling")
-    max_new = st.slider("Max new tokens", 8, 512, 128, 8)
+    ctx_len = config.context_length
+    max_new = st.slider("Max new tokens", 8, ctx_len, min(128, ctx_len), 8)
     sampling = st.radio("Strategy", ["multinomial", "greedy"], horizontal=True)
     temperature_disabled = sampling == "greedy"
     temperature = st.slider("Temperature", 0.1, 2.0, 0.9, 0.05, disabled=temperature_disabled)
@@ -106,8 +109,6 @@ with st.sidebar:
         "Decode them to readable characters in the generation panel. The per-byte "
         "surprisal heatmap below always shows the raw bytes the model produced.",
     )
-
-model, vocab, metadata, config, n_params = load_model(entry["path"], device)
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Dataset", entry["dataset"])
@@ -137,6 +138,12 @@ if st.button("Generate", type="primary"):
     plen = prompt_ids.shape[1]
     continuation = vocab.decode(out[0, plen:].cpu())
 
+    # The post-generation analyses call model.forward, which is capped at the
+    # context length, so score the last context_length tokens when a long
+    # generation overflows the window (no-op for shorter samples).
+    view = out[:, -ctx_len:]
+    view_plen = max(0, plen - (out.shape[1] - view.shape[1]))
+
     # Optionally decode enwik8's HTML entities (&quot;, &lt;, …) for readability.
     # The model emits them verbatim from the corpus; the surprisal heatmap below
     # stays on raw bytes so it keeps matching the actual token stream.
@@ -154,7 +161,7 @@ if st.button("Generate", type="primary"):
 
     # SNN-distinctive readout: spike statistics over the generated sequence.
     stats = collect_spike_statistics(
-        model, out[0].cpu(), context_length=out.shape[1], batch_size=1, max_windows=1
+        model, view[0].cpu(), context_length=view.shape[1], batch_size=1, max_windows=1
     )
     pops = stats.populations
     block_pops = [p for k, p in pops.items() if k != "embedding"]
@@ -162,7 +169,7 @@ if st.button("Generate", type="primary"):
     dead_total = sum(p.dead_count for p in block_pops)
     sat_total = sum(p.saturated_count for p in block_pops)
     block_neurons = sum(p.num_channels for p in block_pops)
-    unhealthy_pct = (dead_total + sat_total) / block_neurons * 100 if block_neurons else 0.0
+    silent_pct = (dead_total + sat_total) / block_neurons * 100 if block_neurons else 0.0
     s1, s2, s3 = st.columns(3)
     emb = pops["embedding"].density if "embedding" in pops else float("nan")
     s1.metric("Embedding spike rate", f"{emb * 100:.1f}%")
@@ -172,13 +179,16 @@ if st.button("Generate", type="primary"):
         help="Fraction of neurons firing — sparsity is the point of an SNN.",
     )
     s3.metric(
-        "Dead / saturated / total",
+        "Silent / saturated / total",
         f"{dead_total} / {sat_total} / {block_neurons:,}",
-        f"{unhealthy_pct:.1f}% unhealthy",
-        delta_color="inverse",
-        help="Block neurons that never fire / fire on (nearly) every token in this "
-        "sample / total block neurons (2 LIF populations × "
-        f"{config.n_layer} layers × {config.n_embd} channels).",
+        f"{silent_pct:.1f}% of block neurons",
+        delta_color="off",
+        help="Block neurons that did not fire / fired on (nearly) every token "
+        f"**in this {view.shape[1]}-token sample** / total block neurons "
+        f"(2 LIF populations × {config.n_layer} layers × {config.n_embd} channels). "
+        "On a short sample a silent neuron usually just had few chances to fire; "
+        "run examples/analyze_spikegpt_spikes.py over a corpus for the true "
+        "dead-neuron count (~0.1% for the ctx-3072 model).",
     )
 
     with st.expander("Spiking analysis — per-layer, per-position, neuron health"):
@@ -204,7 +214,7 @@ if st.button("Generate", type="primary"):
                 "population": list(pops),
                 "neurons": [p.num_channels for p in pops.values()],
                 "density %": [f"{p.density * 100:.1f}" for p in pops.values()],
-                "dead": [f"{p.dead_count} ({p.dead_fraction * 100:.1f}%)" for p in pops.values()],
+                "silent": [f"{p.dead_count} ({p.dead_fraction * 100:.1f}%)" for p in pops.values()],
                 "saturated": [
                     f"{p.saturated_count} ({p.saturated_fraction * 100:.1f}%)"
                     for p in pops.values()
@@ -215,7 +225,7 @@ if st.button("Generate", type="primary"):
     # per-byte surprisal heatmap over the continuation
     st.subheader("Per-byte surprisal (bits) — green = confident, red = surprised")
     pieces = []
-    for tok, bits in surprisal_bits(model, out, plen):
+    for tok, bits in surprisal_bits(model, view, view_plen):
         pieces.append(
             f"<span title='{bits:.2f} bits' style='{bits_color(bits)};padding:1px'>"
             f"{byte_glyph(tok)}</span>"
@@ -226,7 +236,7 @@ if st.button("Generate", type="primary"):
         + "</div>",
         unsafe_allow_html=True,
     )
-    bits_only = [b for _, b in surprisal_bits(model, out, plen)]
+    bits_only = [b for _, b in surprisal_bits(model, view, view_plen)]
     if bits_only:
         st.caption(
             f"mean {sum(bits_only) / len(bits_only):.2f} bits/byte over the {len(bits_only)} "
