@@ -163,13 +163,16 @@ if st.button("Generate", type="primary"):
     torch.manual_seed(int(seed))
     next(model.generate_stream(prompt_ids, max_new_tokens=1, **gen_kwargs), None)
 
-    # Stream the generation, updating the panel as tokens arrive. Decode the whole
-    # continuation per update (correct for multi-byte UTF-8); throttle UI updates
-    # on long runs. Re-seed so the shown output is reproducible.
+    # Stream the generation, updating the panel as tokens arrive. Keep tokens on
+    # the device and only sync/decode at render time (deferred GPU->CPU copy lets
+    # the decode loop run without a per-token host stall), and throttle the UI to
+    # ~16 fps so re-rendering never bottlenecks the stream. Re-seed so the shown
+    # output is reproducible.
     torch.manual_seed(int(seed))
-    gen_tokens: list[int] = []
+    token_tensors: list[torch.Tensor] = []  # each [1, 1] on device
     ttft = 0.0
-    render_every = max(1, int(max_new) // 256)
+    render_interval = 0.06
+    last_render = 0.0
     _sync()
     start = time.perf_counter()
     for i, token in enumerate(
@@ -178,14 +181,17 @@ if st.button("Generate", type="primary"):
         if i == 0:
             _sync()
             ttft = time.perf_counter() - start
-        gen_tokens.append(int(token[0, 0]))
-        if i % render_every == 0:
-            render_generation(vocab.decode(torch.tensor(gen_tokens)))
+        token_tensors.append(token)
+        now = time.perf_counter()
+        if now - last_render >= render_interval:
+            ids_so_far = torch.cat(token_tensors, dim=1)[0].cpu()
+            render_generation(vocab.decode(ids_so_far))
+            last_render = now
     _sync()
     gen_time = time.perf_counter() - start
-    tokens_per_s = len(gen_tokens) / gen_time if gen_time > 0 else 0.0
+    tokens_per_s = len(token_tensors) / gen_time if gen_time > 0 else 0.0
 
-    generated = torch.tensor(gen_tokens, dtype=torch.long, device=device).unsqueeze(0)
+    generated = torch.cat(token_tensors, dim=1)
     out = torch.cat([prompt_ids, generated], dim=1)
     render_generation(vocab.decode(generated[0].cpu()))  # final full render
 
@@ -204,7 +210,7 @@ if st.button("Generate", type="primary"):
     p2.metric(
         "Throughput",
         f"{tokens_per_s:.1f} tok/s",
-        help=f"{len(gen_tokens)} tokens / {gen_time:.2f}s end-to-end on {device}.",
+        help=f"{len(token_tensors)} tokens / {gen_time:.2f}s end-to-end on {device}.",
     )
     p3.metric("Total generation", f"{gen_time:.2f} s")
 
