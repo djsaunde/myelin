@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import json
 import math
+import time
 from pathlib import Path
 from typing import cast
 
@@ -82,11 +83,14 @@ with st.sidebar:
     idx = st.selectbox("Checkpoint", range(len(registry)), format_func=lambda i: labels[i])
     entry = registry[idx]
     cuda_ok = torch.cuda.is_available()
+    # Default to the GPU when one is present; only offer CPU as a fallback (and
+    # as the only option when no CUDA device exists).
     device = st.radio(
         "Device",
-        ["cpu", "cuda"] if cuda_ok else ["cpu"],
+        ["cuda", "cpu"] if cuda_ok else ["cpu"],
         horizontal=True,
-        help="GPU may be busy with a training run; CPU is safe for short generations.",
+        help="Defaults to the GPU when available. CPU is the fallback (and the only "
+        "option with no CUDA device); long generations are much slower on it.",
     )
 
     model, vocab, metadata, config, n_params = load_model(entry["path"], device)
@@ -124,17 +128,36 @@ if st.button("Generate", type="primary"):
     if not prompt:
         st.warning("Enter a prompt.")
         st.stop()
-    torch.manual_seed(int(seed))
     prompt_ids = vocab.encode(prompt).unsqueeze(0).to(device)
+    torch_device = torch.device(device)
+
+    def _sync() -> None:
+        if torch_device.type == "cuda":
+            torch.cuda.synchronize()
+
+    gen_kwargs = {
+        "temperature": float(temperature),
+        "top_k": int(top_k),
+        "sampling": cast(SamplingMode, sampling),
+        "use_cache": use_cache,
+    }
     with st.spinner(f"Generating {max_new} tokens on {device}…"):
-        out = model.generate(
-            prompt_ids,
-            max_new_tokens=int(max_new),
-            temperature=float(temperature),
-            top_k=int(top_k),
-            sampling=cast(SamplingMode, sampling),
-            use_cache=use_cache,
-        )
+        # Time to first token (prefill + 1 decode); the first call also warms the
+        # CUDA kernels so the throughput measurement below is not skewed by it.
+        torch.manual_seed(int(seed))
+        _sync()
+        ttft_start = time.perf_counter()
+        model.generate(prompt_ids, max_new_tokens=1, **gen_kwargs)
+        _sync()
+        ttft = time.perf_counter() - ttft_start
+        # Full generation, re-seeded so the shown output is reproducible.
+        torch.manual_seed(int(seed))
+        _sync()
+        gen_start = time.perf_counter()
+        out = model.generate(prompt_ids, max_new_tokens=int(max_new), **gen_kwargs)
+        _sync()
+        gen_time = time.perf_counter() - gen_start
+    tokens_per_s = int(max_new) / gen_time if gen_time > 0 else 0.0
     plen = prompt_ids.shape[1]
     continuation = vocab.decode(out[0, plen:].cpu())
 
@@ -158,6 +181,19 @@ if st.button("Generate", type="primary"):
         f"<span style='font-weight:600'>{html.escape(show_cont)}</span></div>",
         unsafe_allow_html=True,
     )
+
+    p1, p2, p3 = st.columns(3)
+    p1.metric(
+        "Time to first token",
+        f"{ttft * 1000:.0f} ms",
+        help="Prompt prefill + first decoded token, on the selected device.",
+    )
+    p2.metric(
+        "Throughput",
+        f"{tokens_per_s:.1f} tok/s",
+        help=f"{max_new} tokens / {gen_time:.2f}s end-to-end on {device}.",
+    )
+    p3.metric("Total generation", f"{gen_time:.2f} s")
 
     # SNN-distinctive readout: spike statistics over the generated sequence.
     stats = collect_spike_statistics(
