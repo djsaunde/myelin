@@ -1,10 +1,17 @@
 [
   {
-    "name": "SpikeGPT enwik8 — full repro (best)",
+    "name": "SpikeGPT enwik8 — best (batch-64 fast)",
+    "path": "runs/spikegpt_enwik8_12L512d_fast.best.pt",
+    "dataset": "enwik8 (byte-level)",
+    "metric": "test BPC 1.235 (strided, full-context)",
+    "blurb": "Tuned batch-64 / lr-2e-3 run (~9h). Beats the paper's 1.283 by ~0.05 and the batch-12 run (1.281) — faster AND a better optimum."
+  },
+  {
+    "name": "SpikeGPT enwik8 — batch-12 repro",
     "path": "runs/spikegpt_enwik8_12L512d_repro.best.pt",
     "dataset": "enwik8 (byte-level)",
     "metric": "test BPC 1.281 (strided, full-context)",
-    "blurb": "Full ~10B-token reproduction. Matches the paper's 1.283 (ctx-1024). Stabilized recipe (lr 4e-4, wd 0.1), bf16, best-val checkpoint."
+    "blurb": "Full ~10B-token reproduction at the paper's global batch (12). Matches the paper's 1.283 (ctx-1024). Stabilized recipe (lr 4e-4, wd 0.1), bf16."
   },
   {
     "name": "SpikeGPT enwik8 — v2 (120k)",
