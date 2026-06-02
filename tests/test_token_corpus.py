@@ -42,6 +42,28 @@ def test_sample_token_batch_over_memmap_matches_tensor_interface(tmp_path) -> No
     assert int(inputs.max()) < corpus.vocab_size
 
 
+def test_split_tail_holds_out_in_domain_validation(tmp_path) -> None:
+    ids = list(range(1000))
+    bin_path = tmp_path / "c.bin"
+    with TokenCorpusWriter(bin_path, vocab_size=1024) as writer:
+        writer.write(ids)
+    corpus = MemmapTokenCorpus.open(bin_path)
+
+    head, tail = corpus.split_tail(200)
+    assert head.numel() == 800
+    assert tail.numel() == 200
+    assert head.vocab_size == tail.vocab_size == 1024
+    assert head[0:5].tolist() == [0, 1, 2, 3, 4]
+    assert tail[0:5].tolist() == [800, 801, 802, 803, 804]
+    # The held-out tail drives the sampler just like a full corpus.
+    inputs, _targets = sample_token_batch(tail, batch_size=2, context_length=8, device="cpu")
+    assert inputs.shape == (2, 8)
+    import pytest
+
+    with pytest.raises(ValueError, match="tail_tokens"):
+        corpus.split_tail(0)
+
+
 def test_writer_rejects_vocab_exceeding_dtype(tmp_path) -> None:
     import pytest
 

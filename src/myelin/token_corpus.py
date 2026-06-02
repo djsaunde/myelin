@@ -60,6 +60,35 @@ class MemmapTokenCorpus:
         # exactly and is independent of the underlying read-only memmap buffer.
         return torch.from_numpy(np.asarray(self._mm[index], dtype=np.int64))
 
+    def split_tail(self, tail_tokens: int) -> tuple[TokenArrayView, TokenArrayView]:
+        """Return ``(head, tail)`` no-copy views: the last ``tail_tokens`` as the
+        tail (an in-domain held-out validation slice), the rest as the head."""
+        if not 0 < tail_tokens < self.n_tokens:
+            raise ValueError(f"tail_tokens must be in (0, {self.n_tokens}); got {tail_tokens}")
+        cut = self.n_tokens - tail_tokens
+        return (
+            TokenArrayView(self._mm[:cut], self.vocab_size),
+            TokenArrayView(self._mm[cut:], self.vocab_size),
+        )
+
+
+class TokenArrayView:
+    """A contiguous, no-copy sub-range of a token array exposing ``TokenSource``."""
+
+    def __init__(self, array: np.ndarray, vocab_size: int) -> None:
+        self._array = array
+        self.vocab_size = int(vocab_size)
+        self.n_tokens = int(len(array))
+
+    def numel(self) -> int:
+        return self.n_tokens
+
+    def __len__(self) -> int:
+        return self.n_tokens
+
+    def __getitem__(self, index: slice) -> torch.Tensor:
+        return torch.from_numpy(np.asarray(self._array[index], dtype=np.int64))
+
 
 class TokenCorpusWriter:
     """Stream token ids to a ``uint16`` ``.bin`` and write the sidecar on close."""

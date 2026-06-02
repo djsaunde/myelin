@@ -34,6 +34,7 @@ from myelin import (
     MemmapTokenCorpus,
     SpikeGPTConfig,
     SpikeLanguageModel,
+    TokenArrayView,
     evaluate_language_model,
     evaluate_language_model_strided,
     load_spike_language_checkpoint,
@@ -161,6 +162,14 @@ def main() -> None:
     )
     parser.add_argument("--val-bin", type=Path, help="pre-tokenized val corpus (memmap)")
     parser.add_argument("--test-bin", type=Path, help="pre-tokenized test corpus (memmap)")
+    parser.add_argument(
+        "--val-holdout-tokens",
+        type=int,
+        default=0,
+        help="with --train-bin, hold out this many tokens from the END of the train "
+        "corpus as an in-domain validation slice (measures the true generalization "
+        "gap). Overrides --val-bin. 0 disables.",
+    )
     parser.add_argument(
         "--vocab",
         choices=("char", "byte", "bpe"),
@@ -430,16 +439,24 @@ def main() -> None:
         checkpoint_metadata = checkpoint.metadata
     if use_bins:
         assert args.train_bin is not None
-        train_tokens: torch.Tensor | MemmapTokenCorpus = MemmapTokenCorpus.open(args.train_bin)
-        if train_tokens.vocab_size != vocabulary.size:
+        corpus = MemmapTokenCorpus.open(args.train_bin)
+        if corpus.vocab_size != vocabulary.size:
             raise ValueError(
-                f"--train-bin vocab_size {train_tokens.vocab_size} != model vocab "
+                f"--train-bin vocab_size {corpus.vocab_size} != model vocab "
                 f"{vocabulary.size}; tokenize with the matching --bpe-tokenizer/--vocab"
             )
-        val_tokens: torch.Tensor | MemmapTokenCorpus = (
-            MemmapTokenCorpus.open(args.val_bin) if args.val_bin is not None else train_tokens
-        )
-        test_tokens: torch.Tensor | MemmapTokenCorpus = (
+        train_tokens: torch.Tensor | MemmapTokenCorpus | TokenArrayView
+        val_tokens: torch.Tensor | MemmapTokenCorpus | TokenArrayView
+        if args.val_holdout_tokens > 0:
+            # Hold out an in-domain tail of the train corpus as validation, so the
+            # in-loop eval measures the true generalization gap (not a different
+            # domain). --val-bin, if given, is ignored in this mode.
+            train_tokens, val_tokens = corpus.split_tail(args.val_holdout_tokens)
+        elif args.val_bin is not None:
+            train_tokens, val_tokens = corpus, MemmapTokenCorpus.open(args.val_bin)
+        else:
+            train_tokens, val_tokens = corpus, corpus
+        test_tokens: torch.Tensor | MemmapTokenCorpus | TokenArrayView = (
             MemmapTokenCorpus.open(args.test_bin)
             if args.test_bin is not None
             else torch.empty(0, dtype=torch.long)

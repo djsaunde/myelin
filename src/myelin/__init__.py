@@ -215,7 +215,7 @@ from myelin.surrogates import (
     superspike_surrogate,
     triangular_surrogate,
 )
-from myelin.token_corpus import MemmapTokenCorpus, TokenCorpusWriter
+from myelin.token_corpus import MemmapTokenCorpus, TokenArrayView, TokenCorpusWriter
 
 __all__ = [
     "ALIFParams",
@@ -225,6 +225,7 @@ __all__ = [
     "BPEVocabulary",
     "ByteVocabulary",
     "MemmapTokenCorpus",
+    "TokenArrayView",
     "TokenCorpusWriter",
     "CharacterVocabulary",
     "CheckpointPolicy",
