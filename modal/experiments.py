@@ -417,3 +417,29 @@ def wkv_throughput() -> None:
             cwd=REMOTE,
             check=True,
         )
+
+
+@app.function(gpu=GPU, timeout=30 * 60)
+def mfu_216m() -> None:
+    """Accurate MFU + profiler op-breakdown for the 216M training step (sm_120,
+    same arch as the local 5090, so the MFU% is representative)."""
+    subprocess.run(
+        [
+            VENV_PY,
+            "-m",
+            "myelin.benchmarks.spikegpt_mfu",
+            "--device",
+            "cuda",
+            "--preset",
+            "gpt2-216m",
+            "--batch",
+            "16",
+            "--amp",
+            "bf16",
+            "--compile",
+            "regional",
+            "--trace",
+        ],
+        cwd=REMOTE,
+        check=True,
+    )
