@@ -321,6 +321,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--reset-schedule",
+        action="store_true",
+        help=(
+            "fine-tune mode: load only the model weights from --checkpoint-in, but reset the "
+            "step counter (previous_steps=0) so the LR schedule is a fresh warmup->cosine over "
+            "--steps, and start with a fresh optimizer (do not load the pretrain Adam state). "
+            "Use when adapting a pretrained checkpoint to a new corpus; omit to resume a run."
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-out",
         type=Path,
         help="optional path for saving the trained SpikeGPT model checkpoint",
@@ -488,9 +498,13 @@ def main() -> None:
     # and finished runs. Fall back to total_steps/steps for older checkpoints that
     # predate the field.
     previous_steps = (
-        metadata_nonnegative_int(checkpoint_metadata, "previous_steps")
-        or metadata_nonnegative_int(checkpoint_metadata, "total_steps")
-        or metadata_nonnegative_int(checkpoint_metadata, "steps")
+        0
+        if args.reset_schedule
+        else (
+            metadata_nonnegative_int(checkpoint_metadata, "previous_steps")
+            or metadata_nonnegative_int(checkpoint_metadata, "total_steps")
+            or metadata_nonnegative_int(checkpoint_metadata, "steps")
+        )
     )
     total_steps = previous_steps + args.steps
     compile_model = (
@@ -565,7 +579,11 @@ def main() -> None:
         fused=torch.device(args.device).type == "cuda",
     )
     optimizer_loaded = False
-    if checkpoint is not None and checkpoint.optimizer_state_dict is not None:
+    if (
+        checkpoint is not None
+        and checkpoint.optimizer_state_dict is not None
+        and not args.reset_schedule
+    ):
         optimizer.load_state_dict(checkpoint.optimizer_state_dict)
         optimizer_loaded = True
         for group in optimizer.param_groups:
