@@ -356,6 +356,13 @@ def main() -> None:
             "use 'default' for fast iteration. Ignored by regional-lite (fast-compile preset)."
         ),
     )
+    parser.add_argument(
+        "--compile-tail",
+        action="store_true",
+        help="also compile the ln_out/head/cross-entropy tail (regional only). Fuses the "
+        "large-vocab head + CE — most of a full-model compile's win (~+6%% on the 216M) "
+        "without the whole-model graph-break fragility.",
+    )
     add_grad_clip_arg(parser)
     add_matmul_precision_arg(parser, default="high")
     parser.add_argument(
@@ -542,6 +549,11 @@ def main() -> None:
         if args.compile in ("regional", "regional-lite")
         else compile_training_model(raw_model, compile_model)
     )
+    if args.compile_tail and args.compile in ("regional", "regional-lite"):
+        # Compile just the head/CE tail as its own region (regional model is
+        # raw_model, compiled in place); keeps the recurrent body on the validated
+        # regional path while fusing the large-vocab head + cross-entropy.
+        raw_model.loss_tail = torch.compile(raw_model.loss_tail, mode=compile_mode)  # type: ignore[method-assign]
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=args.lr,

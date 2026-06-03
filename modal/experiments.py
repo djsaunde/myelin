@@ -450,3 +450,33 @@ def mfu_216m() -> None:
         check=True,
     )
     traces.commit()
+
+
+@app.function(gpu=GPU, timeout=40 * 60)
+def mfu_compile_ab() -> None:
+    """A/B compile scope x mode for the 216M step: does max-autotune (and/or full
+    compile of the head/CE tail) beat the default regional compile?"""
+    mode = "max-autotune-no-cudagraphs"
+    for scope, tail in (("regional", False), ("regional", True), ("full", False)):
+        label = f"{scope}{'+tail' if tail else ''}"
+        print(f"\n========== compile={label} mode={mode} ==========", flush=True)
+        cmd = [
+            VENV_PY,
+            "-m",
+            "myelin.benchmarks.spikegpt_mfu",
+            "--device",
+            "cuda",
+            "--preset",
+            "gpt2-216m",
+            "--batch",
+            "16",
+            "--amp",
+            "bf16",
+            "--compile",
+            scope,
+            "--compile-mode",
+            mode,
+        ]
+        if tail:
+            cmd.append("--compile-tail")
+        subprocess.run(cmd, cwd=REMOTE, check=True)

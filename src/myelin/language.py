@@ -1252,10 +1252,21 @@ class SpikeLanguageModel(nn.Module):
         hidden = self.embed_tokens(input_ids)
         for block in self.blocks:
             hidden = self._run_block(block, hidden)
-        logits = self.head(self.ln_out(hidden))
 
         if targets is None:
-            return logits
+            return self.head(self.ln_out(hidden))
+        return self.loss_tail(hidden, targets)
+
+    def loss_tail(
+        self, hidden: torch.Tensor, targets: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Final ``ln_out -> head -> cross_entropy`` from the block output.
+
+        Split out so it can be ``torch.compile``d as its own region (fusing the
+        large vocab head + cross-entropy), which is most of the win of a
+        full-model compile without the whole-model graph-break fragility.
+        """
+        logits = self.head(self.ln_out(hidden))
         loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
         return loss, logits
 

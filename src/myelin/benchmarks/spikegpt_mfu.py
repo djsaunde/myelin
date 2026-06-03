@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import time
 from dataclasses import dataclass
+from typing import cast
 
 import torch
 from torch.utils.flop_counter import FlopCounterMode
@@ -70,7 +71,7 @@ def measure_peak_bf16_flops(
 
 
 def measure_step_ms(
-    model: SpikeLanguageModel,
+    model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     inputs: torch.Tensor,
     targets: torch.Tensor,
@@ -158,13 +159,21 @@ def run(args) -> MFUResult:
 
     # FLOPs: eager (compile-invariant). Then optionally compile for timing.
     matmul_flops = count_fwd_bwd_flops(model, inputs, targets)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=device.type == "cuda")
+    mode = None if args.compile_mode == "default" else args.compile_mode
+    forward: torch.nn.Module = model
     if args.compile == "regional":
         for index, block in enumerate(model.blocks):
-            model.blocks[index] = torch.compile(block)  # type: ignore[index]
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=device.type == "cuda")
+            model.blocks[index] = torch.compile(block, mode=mode)  # type: ignore[index]
+        if args.compile_tail:
+            model.loss_tail = torch.compile(model.loss_tail, mode=mode)  # type: ignore[method-assign]
+    elif args.compile == "full":
+        # Compile the whole forward incl. the ln_out/head/cross-entropy tail; the
+        # WKV/LIF custom ops stay opaque (no loop unroll).
+        forward = cast(torch.nn.Module, torch.compile(model, mode=mode))
 
     step_ms = measure_step_ms(
-        model, optimizer, inputs, targets, device=device, amp=args.amp == "bf16"
+        forward, optimizer, inputs, targets, device=device, amp=args.amp == "bf16"
     )
     tokens_per_s = args.batch * ctx / (step_ms / 1000.0)
     achieved = matmul_flops / (step_ms / 1000.0)
@@ -183,7 +192,8 @@ def run(args) -> MFUResult:
     print()
     print(
         f"config: {layers}L/{embd}d ctx{ctx} vocab{args.vocab_size} batch{args.batch} "
-        f"dtype={args.amp} compile={args.compile}"
+        f"dtype={args.amp} compile={args.compile}{'+tail' if args.compile_tail else ''}"
+        f"/{args.compile_mode}"
     )
     print(f"params: {params / 1e6:.1f}M")
     print(f"step time: {step_ms:.2f} ms   throughput: {tokens_per_s:,.0f} tok/s")
@@ -202,7 +212,7 @@ def run(args) -> MFUResult:
 
     if args.trace and device.type == "cuda":
         _trace(
-            model,
+            forward,
             optimizer,
             inputs,
             targets,
@@ -280,7 +290,13 @@ def main() -> None:
     parser.add_argument("--vocab-size", type=int, default=50277)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--amp", choices=("off", "bf16"), default="bf16")
-    parser.add_argument("--compile", choices=("off", "regional"), default="regional")
+    parser.add_argument("--compile", choices=("off", "regional", "full"), default="regional")
+    parser.add_argument("--compile-tail", action="store_true", help="compile the head/CE tail")
+    parser.add_argument(
+        "--compile-mode",
+        choices=("default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"),
+        default="default",
+    )
     parser.add_argument("--matmul-precision", choices=("highest", "high", "medium"), default="high")
     parser.add_argument("--activation-checkpointing", action="store_true")
     parser.add_argument("--peak-tflops", type=float, help="spec peak for a second MFU figure")
