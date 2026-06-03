@@ -38,6 +38,9 @@ image = (
 
 app = modal.App(APP_NAME, image=image)
 
+# Persistent storage for downloadable artifacts (profiler traces, etc.).
+traces = modal.Volume.from_name("myelin-traces", create_if_missing=True)
+
 
 def _run(code: str) -> None:
     """Run a python snippet in the replicated uv venv and stream its output."""
@@ -419,10 +422,11 @@ def wkv_throughput() -> None:
         )
 
 
-@app.function(gpu=GPU, timeout=30 * 60)
+@app.function(gpu=GPU, timeout=30 * 60, volumes={"/traces": traces})
 def mfu_216m() -> None:
     """Accurate MFU + profiler op-breakdown for the 216M training step (sm_120,
-    same arch as the local 5090, so the MFU% is representative)."""
+    same arch as the local 5090, so the MFU% is representative). The Chrome trace
+    is written to the persistent ``myelin-traces`` volume for download."""
     subprocess.run(
         [
             VENV_PY,
@@ -439,7 +443,10 @@ def mfu_216m() -> None:
             "--compile",
             "regional",
             "--trace",
+            "--trace-out",
+            "/traces/spikegpt_216m_trace.json",
         ],
         cwd=REMOTE,
         check=True,
     )
+    traces.commit()

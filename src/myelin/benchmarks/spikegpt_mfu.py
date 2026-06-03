@@ -252,6 +252,23 @@ def _trace(model, optimizer, inputs, targets, device, *, amp, out) -> None:
     for name, us in sorted(groups.items(), key=lambda kv: -kv[1]):
         print(f"| {name} | {us / total * 100:.1f}% |")
 
+    # Per-kernel detail: the top GPU consumers (the actionable optimization list).
+    kernels = []
+    for evt in prof.key_averages():
+        cuda_us = float(
+            getattr(evt, "self_device_time_total", 0) or getattr(evt, "self_cuda_time_total", 0)
+        )
+        if cuda_us > 0:
+            count = int(getattr(evt, "count", 0) or 0)
+            kernels.append((evt.key, cuda_us, count))
+    kernels.sort(key=lambda k: -k[1])
+    print("\n## Top GPU kernels (self CUDA time)")
+    print("| kernel | % | total ms | calls | us/call |")
+    print("|---|---:|---:|---:|---:|")
+    for name, us, count in kernels[:25]:
+        per = us / count if count else 0.0
+        print(f"| {name[:70]} | {us / total * 100:.1f}% | {us / 1000:.2f} | {count} | {per:.1f} |")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
