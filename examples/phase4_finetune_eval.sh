@@ -47,6 +47,16 @@ if [[ ! -f "$PRETRAINED" ]]; then
   exit 1
 fi
 
+# --- STEP 0: zero-shot baseline (de-risk) -------------------------------------
+# Eval the pretrained (NOT fine-tuned) checkpoint on the WikiText test set BEFORE
+# fine-tuning. Three purposes: (1) the "OWT2 pretrain, no fine-tune" baseline so we
+# can measure the fine-tune delta; (2) validates the standalone eval harness on the
+# real 216M BPE model before we depend on it; (3) the catastrophic-forgetting
+# tripwire -- if a fine-tune's first val is WORSE than this, the LR is too hot.
+echo "=== STEP 0: zero-shot WikiText test PPL (pretrained, no fine-tune) ==="
+uv run python examples/evaluate_spikegpt_checkpoint.py "$PRETRAINED" \
+  --tokens-bin data/wikitext103/test.bin --device cuda --batch 16
+
 # --- HEADLINE: WikiText-103 fine-tune (118.7M train tokens; ~7.2k steps/epoch) -
 # This is the real target (vs paper 39.75). Conservative LR + best-val checkpoint.
 uv run python examples/train_tiny_spikegpt.py "${COMMON_TRAIN[@]}" \
