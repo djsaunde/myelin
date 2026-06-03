@@ -174,6 +174,45 @@ def lif_bf16io_btc_validate() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=30 * 60)
+def wkv_io_cast_cost() -> None:
+    """Scope the WKV I/O cast-transpose overhead — the upper bound on a bf16 WKV.
+
+    The associative-scan WKV upcasts k/v to fp32 and transposes [B,T,C]->[T,B,C]
+    on the way in (two ``movedim(1,0).contiguous().to(fp32)`` copies) and casts +
+    transposes back on the way out. The fp32 scan itself is inherent (numerically
+    sensitive). This measures the full WKV fwd+bwd vs. just those I/O copies, so we
+    know how much a bf16-I/O WKV kernel could *at most* save before building it.
+    """
+    _run(
+        "import time, torch\n"
+        "from myelin.language import weighted_key_value\n"
+        "dev='cuda'; B,T,C=16,1024,768  # 216M run dims\n"
+        "torch.manual_seed(0)\n"
+        "k=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "v=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "td=torch.randn(C,device=dev); tf=torch.randn(C,device=dev)\n"
+        "gy=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "def bench(fn,n=50):\n"
+        "    for _ in range(5): fn()\n"
+        "    torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "    for _ in range(n): fn()\n"
+        "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/n*1e3\n"
+        "def full():\n"
+        "    ki=k.clone().requires_grad_(True); vi=v.clone().requires_grad_(True)\n"
+        "    out=weighted_key_value(ki,vi,td,tf); out.backward(gy)\n"
+        "def io_only():\n"
+        "    # just the addressable copies: in-cast/transpose x2 + out-cast/transpose\n"
+        "    a=k.movedim(1,0).contiguous().to(torch.float32)\n"
+        "    b=v.movedim(1,0).contiguous().to(torch.float32)\n"
+        "    o=(a+b).movedim(0,1).to(torch.bfloat16); return o\n"
+        "ms_full=bench(full); ms_io=bench(io_only)\n"
+        "print(f'WKV fwd+bwd full {ms_full:.3f} ms  |  I/O cast-transpose only {ms_io:.3f} ms')\n"
+        "print(f'addressable copies = {ms_io/ms_full*100:.1f}% of WKV (fwd-only proxy; '\n"
+        "      f'bwd adds its own transposes, so true ceiling is higher)')"
+    )
+
+
 @app.function(gpu=GPU, timeout=50 * 60)
 def ctx3072_sweep() -> None:
     """Batch sweep at ctx 3072 (12L/512d) — find tok/s + peak GB for the ctx-3072 repro.
