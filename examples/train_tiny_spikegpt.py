@@ -625,8 +625,11 @@ def main() -> None:
             optimizer=optimizer,
         )
 
+    # Bits per modeling unit: "BPC" (bits/char) for byte/char vocabularies, "BPT"
+    # (bits/token) for subword BPE — same value (loss/ln2), unit-correct label.
+    bits_label = "BPT" if isinstance(vocabulary, BPEVocabulary) else "BPC"
     print(
-        "| Step | Train Loss | Val Loss | Val BPC | Val PPL | "
+        f"| Step | Train Loss | Val Loss | Val {bits_label} | Val PPL | "
         "Emb Spike Rate | Mean Block Spike Rate | Grad Norm | Step ms |",
         flush=True,
     )
@@ -784,7 +787,7 @@ def main() -> None:
                     wandb_metrics.update(
                         {
                             "val/loss": eval_metrics.loss,
-                            "val/bpc": eval_metrics.bits_per_character,
+                            f"val/{bits_label.lower()}": eval_metrics.bits_per_character,
                             "val/perplexity": eval_metrics.perplexity,
                         }
                     )
@@ -799,7 +802,7 @@ def main() -> None:
                     save_run_checkpoint(global_step, path=args.best_checkpoint_out)
                     print(
                         f"best_checkpoint={args.best_checkpoint_out} "
-                        f"(step {global_step}, val BPC {best_val_bpc:.4f})",
+                        f"(step {global_step}, val {bits_label} {best_val_bpc:.4f})",
                         flush=True,
                     )
 

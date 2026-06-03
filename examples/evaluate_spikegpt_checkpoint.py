@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from myelin import (
+    BPEVocabulary,
     ByteVocabulary,
     MemmapTokenCorpus,
     evaluate_language_model,
@@ -133,7 +134,8 @@ def main() -> None:
             print(f"eval_skipped={exc}", flush=True)
         else:
             print(f"eval_mode={eval_mode}", flush=True)
-            print("| Loss | BPC | PPL |", flush=True)
+            bits_label = "BPT" if isinstance(vocabulary, BPEVocabulary) else "BPC"
+            print(f"| Loss | {bits_label} | PPL |", flush=True)
             print("|---:|---:|---:|", flush=True)
             print(
                 f"| {metrics.loss:.6f} | {metrics.bits_per_character:.4f} | "
