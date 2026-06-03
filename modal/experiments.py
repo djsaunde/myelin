@@ -215,6 +215,98 @@ def wkv_io_cast_cost() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=30 * 60)
+def wkv_bf16io_validate() -> None:
+    """Validate + benchmark the bf16-I/O WKV vs the fp32-I/O production kernel.
+
+    Confirms (a) the output and all four grads (gk, gv, gtime_decay, gtime_first)
+    are bit-identical to weighted_key_value_triton on bf16 inputs (fp32 in-register
+    + fp32 replay scratch => no precision change), and (b) the fwd+bwd wall-time
+    saved by dropping the .float().contiguous() materializations and halving the
+    kernel's input bandwidth. At the 216M dims.
+    """
+    _run(
+        "import time, torch\n"
+        "from myelin.wkv_triton import weighted_key_value_triton\n"
+        "from myelin.wkv_bf16 import weighted_key_value_triton_bf16io\n"
+        "dev='cuda'; B,T,C=16,1024,768  # 216M run dims\n"
+        "torch.manual_seed(0)\n"
+        "k0=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "v0=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "td=torch.randn(C,device=dev,requires_grad=True)\n"
+        "tf=torch.randn(C,device=dev,requires_grad=True)\n"
+        "gy=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "def run(fn):\n"
+        "    k=k0.clone().requires_grad_(True); v=v0.clone().requires_grad_(True)\n"
+        "    td2=td.detach().clone().requires_grad_(True)\n"
+        "    tf2=tf.detach().clone().requires_grad_(True)\n"
+        "    out=fn(k,v,td2,tf2); out.backward(gy)\n"
+        "    return out, k.grad, v.grad, td2.grad, tf2.grad\n"
+        "o_ref,gk_ref,gv_ref,gtd_ref,gtf_ref=run(weighted_key_value_triton)\n"
+        "o_bf,gk_bf,gv_bf,gtd_bf,gtf_bf=run(weighted_key_value_triton_bf16io)\n"
+        "def cmp(name,a,b):\n"
+        "    ex=torch.equal(a,b)\n"
+        "    md=(a.float()-b.float()).abs().max().item()\n"
+        "    print(f'  {name:10s} exact={ex}  max|d|={md:.3e}')\n"
+        "print('(a) bf16-I/O vs fp32-I/O kernel (bit-parity):')\n"
+        "cmp('out',o_ref,o_bf); cmp('grad_k',gk_ref,gk_bf); cmp('grad_v',gv_ref,gv_bf)\n"
+        "cmp('grad_td',gtd_ref,gtd_bf); cmp('grad_tf',gtf_ref,gtf_bf)\n"
+        "def bench(fn,n=50):\n"
+        "    for _ in range(5): fn()\n"
+        "    torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "    for _ in range(n): fn()\n"
+        "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/n*1e3\n"
+        "ms_ref=bench(lambda: run(weighted_key_value_triton))\n"
+        "ms_bf=bench(lambda: run(weighted_key_value_triton_bf16io))\n"
+        "print(f'(b) WKV fwd+bwd  fp32-I/O {ms_ref:.3f} ms  |  "
+        "bf16-I/O {ms_bf:.3f} ms  ({ms_ref/ms_bf:.2f}x, -{(1-ms_bf/ms_ref)*100:.1f}%)')"
+    )
+
+
+@app.function(gpu=GPU, timeout=30 * 60)
+def wkv_step_ab() -> None:
+    """End-to-end 216M step: bf16-I/O WKV vs fp32-I/O WKV (eager, model dims).
+
+    The op-level win is -32%; this measures what fraction of a real fwd+bwd+opt
+    step that buys, by toggling the kernel the model dispatches to. Eager (the
+    WKV is an opaque custom op, so compile doesn't change its cost; eager just
+    inflates the non-WKV share, making this a conservative lower bound on the
+    compiled step win the live run will see).
+    """
+    _run(
+        "import time, torch\n"
+        "import myelin.language as L\n"
+        "from myelin.language import SpikeGPTConfig, SpikeLanguageModel\n"
+        "from myelin.wkv_triton import weighted_key_value_triton\n"
+        "from myelin.wkv_bf16 import weighted_key_value_triton_bf16io\n"
+        "torch.set_float32_matmul_precision('high')\n"
+        "dev='cuda'; B,T=16,1024\n"
+        "cfg=SpikeGPTConfig(vocab_size=50277,context_length=T,n_layer=18,n_embd=768,dropout=0.0)\n"
+        "torch.manual_seed(0); model=SpikeLanguageModel(cfg).to(dev)\n"
+        "opt=torch.optim.AdamW(model.parameters(),lr=1e-4,fused=True)\n"
+        "ids=torch.randint(0,50277,(B,T+1),device=dev); inp,tgt=ids[:,:T],ids[:,1:]\n"
+        "def step():\n"
+        "    opt.zero_grad(set_to_none=True)\n"
+        "    with torch.autocast('cuda',dtype=torch.bfloat16):\n"
+        "        loss,_=model(inp,tgt)\n"
+        "    loss.backward(); opt.step()\n"
+        "def bench():\n"
+        "    for _ in range(5): step()\n"
+        "    torch.cuda.synchronize(); ts=[]\n"
+        "    for _ in range(20):\n"
+        "        torch.cuda.synchronize(); t0=time.perf_counter(); step()\n"
+        "        torch.cuda.synchronize(); ts.append((time.perf_counter()-t0)*1e3)\n"
+        "    ts.sort(); return ts[len(ts)//2]\n"
+        "# current default dispatches to bf16-I/O under autocast; force each in turn\n"
+        "L.weighted_key_value_triton_bf16io=weighted_key_value_triton_bf16io\n"
+        "ms_bf=bench()\n"
+        "L.weighted_key_value_triton_bf16io=weighted_key_value_triton  # force fp32-I/O\n"
+        "ms_f32=bench()\n"
+        "print(f'216M eager step  fp32-I/O WKV {ms_f32:.2f} ms  |  "
+        "bf16-I/O WKV {ms_bf:.2f} ms  ({ms_f32/ms_bf:.3f}x, -{(1-ms_bf/ms_f32)*100:.1f}%)')"
+    )
+
+
 @app.function(gpu=GPU, timeout=50 * 60)
 def ctx3072_sweep() -> None:
     """Batch sweep at ctx 3072 (12L/512d) — find tok/s + peak GB for the ctx-3072 repro.

@@ -36,6 +36,7 @@ from myelin.surrogates import (
 )
 from myelin.triton.lif import surrogate_id as lif_surrogate_id
 from myelin.triton.lif_bf16 import surrogate_lif_bf16io
+from myelin.wkv_bf16 import weighted_key_value_triton_bf16io
 from myelin.wkv_triton import weighted_key_value_triton
 
 # Reverse lookup (built-in surrogate callable -> name) so SpikingSequenceLIF can
@@ -981,9 +982,14 @@ class SpikeTimeMix(nn.Module):
         receptance = torch.sigmoid(self.receptance(receptance_input))
         # Fused Triton WKV on CUDA: ~10% faster step / ~25% less memory than the
         # associative_scan path with exact gradients (parity vs the loop oracle to
-        # fp32). Falls back to associative_scan on CPU or without Triton.
+        # fp32). Under bf16/fp16 autocast the bf16-I/O kernel is bit-identical but
+        # ~1.5x faster (skips the fp32 materialization, halves input bandwidth).
+        # Falls back to associative_scan on CPU or without Triton.
         if key.is_cuda and has_triton():
-            wkv = weighted_key_value_triton(key, value, self.time_decay, self.time_first)
+            if key.dtype in (torch.bfloat16, torch.float16):
+                wkv = weighted_key_value_triton_bf16io(key, value, self.time_decay, self.time_first)
+            else:
+                wkv = weighted_key_value_triton(key, value, self.time_decay, self.time_first)
         else:
             wkv = weighted_key_value(key, value, self.time_decay, self.time_first)
         mixed = receptance * wkv
