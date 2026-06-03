@@ -176,17 +176,19 @@ def lif_bf16io_btc_validate() -> None:
 
 @app.function(gpu=GPU, timeout=30 * 60)
 def wkv_io_cast_cost() -> None:
-    """Scope the WKV I/O cast-transpose overhead — the upper bound on a bf16 WKV.
+    """Scope the fp32-cast overhead in the *real* (Triton) WKV path on GPU.
 
-    The associative-scan WKV upcasts k/v to fp32 and transposes [B,T,C]->[T,B,C]
-    on the way in (two ``movedim(1,0).contiguous().to(fp32)`` copies) and casts +
-    transposes back on the way out. The fp32 scan itself is inherent (numerically
-    sensitive). This measures the full WKV fwd+bwd vs. just those I/O copies, so we
-    know how much a bf16-I/O WKV kernel could *at most* save before building it.
+    On CUDA the model uses ``weighted_key_value_triton`` (a [B,T,C]-native fused
+    kernel — no transposes). But its wrapper materializes fp32 copies via
+    ``key.float().contiguous()`` / ``value.float().contiguous()`` (fwd) plus three
+    more on backward (grad_y, k, v) before the kernel reads them at 4 bytes/elem.
+    A bf16-I/O WKV kernel (load bf16, cast to fp32 in-register, fp32 recurrence,
+    store bf16 — same trick that gave the LIF ~1.5x) would drop those. This sizes
+    the addressable cost: full WKV fwd+bwd vs. just the fp32 cast copies.
     """
     _run(
         "import time, torch\n"
-        "from myelin.language import weighted_key_value\n"
+        "from myelin.wkv_triton import weighted_key_value_triton\n"
         "dev='cuda'; B,T,C=16,1024,768  # 216M run dims\n"
         "torch.manual_seed(0)\n"
         "k=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
@@ -200,16 +202,16 @@ def wkv_io_cast_cost() -> None:
         "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/n*1e3\n"
         "def full():\n"
         "    ki=k.clone().requires_grad_(True); vi=v.clone().requires_grad_(True)\n"
-        "    out=weighted_key_value(ki,vi,td,tf); out.backward(gy)\n"
-        "def io_only():\n"
-        "    # just the addressable copies: in-cast/transpose x2 + out-cast/transpose\n"
-        "    a=k.movedim(1,0).contiguous().to(torch.float32)\n"
-        "    b=v.movedim(1,0).contiguous().to(torch.float32)\n"
-        "    o=(a+b).movedim(0,1).to(torch.bfloat16); return o\n"
-        "ms_full=bench(full); ms_io=bench(io_only)\n"
-        "print(f'WKV fwd+bwd full {ms_full:.3f} ms  |  I/O cast-transpose only {ms_io:.3f} ms')\n"
-        "print(f'addressable copies = {ms_io/ms_full*100:.1f}% of WKV (fwd-only proxy; '\n"
-        "      f'bwd adds its own transposes, so true ceiling is higher)')"
+        "    out=weighted_key_value_triton(ki,vi,td,tf); out.backward(gy)\n"
+        "def cast_only():\n"
+        "    # the addressable copies: fwd k,v upcast + bwd grad_y,k,v upcast (5 total)\n"
+        "    a=k.float().contiguous(); b=v.float().contiguous()\n"
+        "    c=gy.float().contiguous(); d=k.float().contiguous(); e=v.float().contiguous()\n"
+        "    return a,b,c,d,e\n"
+        "ms_full=bench(full); ms_cast=bench(cast_only)\n"
+        "print(f'WKV(Triton) fwd+bwd {ms_full:.3f} ms  |  fp32 cast copies {ms_cast:.3f} ms')\n"
+        "print(f'addressable fp32 casts = {ms_cast/ms_full*100:.1f}% of WKV  '\n"
+        "      f'(a bf16-I/O kernel also halves the kernel input bandwidth on top)')"
     )
 
 
