@@ -110,6 +110,70 @@ def lif_bf16_bench() -> None:
     )
 
 
+@app.function(gpu=GPU, timeout=30 * 60)
+def lif_bf16io_btc_validate() -> None:
+    """Validate + benchmark the [B,T,C]-native LIF vs the [T,B,C] kernel + transposes.
+
+    The production fast path feeds the LIF via ``movedim(1,0).contiguous()`` on
+    input and ``movedim(0,1)`` on output (two transpose copies that showed up in
+    the profiler's copy overhead). ``surrogate_lif_bf16io_btc`` consumes the native
+    [B,T,C] layout directly. This confirms (a) bit-parity of spikes+grads with the
+    transposed [T,B,C] kernel it replaces, (b) parity vs the fp32 loop oracle, and
+    (c) the wall-time saved by dropping the two transposes (fwd+bwd, model dims).
+    """
+    _run(
+        "import time, torch\n"
+        "from myelin.language import SpikingSequenceLIF\n"
+        "from myelin.neurons import LIFParams, LIFState\n"
+        "from myelin.triton.lif_bf16 import surrogate_lif_bf16io, surrogate_lif_bf16io_btc\n"
+        "dev='cuda'; B,T,C=16,1024,768  # 216M run dims\n"
+        "par=LIFParams(tau_mem=2.0,threshold=1.0,reset=0.0)\n"
+        "torch.manual_seed(0)\n"
+        "xb=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "gy=torch.randn(B,T,C,device=dev,dtype=torch.bfloat16)\n"
+        "# --- (a) bit-parity: BTC-native vs TBC-kernel + transposes (same math) ---\n"
+        "xt=xb.clone().requires_grad_(True)\n"
+        "ct=xt.movedim(1,0).contiguous()\n"
+        "it=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "sp_t=surrogate_lif_bf16io(ct,it,par).movedim(0,1)\n"
+        "sp_t.backward(gy)\n"
+        "xc=xb.clone().requires_grad_(True)\n"
+        "ic=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "sp_c=surrogate_lif_bf16io_btc(xc,ic,par)\n"
+        "sp_c.backward(gy)\n"
+        "sp_exact=torch.equal(sp_c,sp_t); g_exact=torch.equal(xc.grad,xt.grad)\n"
+        "sp_pct=(sp_c==sp_t).float().mean().item()*100\n"
+        "g_max=(xc.grad.float()-xt.grad.float()).abs().max().item()\n"
+        "print(f'(a) BTC vs TBC+transpose: spikes exact={sp_exact} ({sp_pct:.3f}%)  "
+        "grad exact={g_exact} max|d|={g_max:.3e}')\n"
+        "# --- (b) parity vs fp32 loop oracle (same bf16-rounded inputs) ---\n"
+        "ref=SpikingSequenceLIF(tau=2.0,threshold=1.0,surrogate_slope=2.0,fused=False).to(dev)\n"
+        "xf=xb.float().clone().requires_grad_(True)\n"
+        "sp_ref=ref(xf); sp_ref.backward(gy.float())\n"
+        "match=(sp_c.float()==sp_ref).float().mean().item()*100\n"
+        "rel=((xc.grad.float()-xf.grad).abs().max()/(xf.grad.abs().max()+1e-9)).item()\n"
+        "print(f'(b) BTC vs fp32 oracle: spikes match {match:.2f}%  grad rel-err {rel:.3e}')\n"
+        "# --- (c) bench fwd+bwd: TBC+transposes (production today) vs BTC-native ---\n"
+        "def bench(fn):\n"
+        "    for _ in range(5): fn()\n"
+        "    torch.cuda.synchronize(); t0=time.perf_counter()\n"
+        "    for _ in range(50): fn()\n"
+        "    torch.cuda.synchronize(); return (time.perf_counter()-t0)/50*1e3\n"
+        "def tbc():\n"
+        "    xi=xb.clone().requires_grad_(True)\n"
+        "    c=xi.movedim(1,0).contiguous()\n"
+        "    i=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "    s=surrogate_lif_bf16io(c,i,par).movedim(0,1); s.backward(gy)\n"
+        "def btc():\n"
+        "    xi=xb.clone().requires_grad_(True)\n"
+        "    i=LIFState(membrane=torch.zeros(B,C,device=dev,dtype=torch.bfloat16))\n"
+        "    s=surrogate_lif_bf16io_btc(xi,i,par); s.backward(gy)\n"
+        "ms_t=bench(tbc); ms_c=bench(btc)\n"
+        "print(f'(c) LIF fwd+bwd  TBC+transpose {ms_t:.3f} ms  |  "
+        "BTC-native {ms_c:.3f} ms  ({ms_t/ms_c:.2f}x, -{(1-ms_c/ms_t)*100:.1f}%)')"
+    )
+
+
 @app.function(gpu=GPU, timeout=50 * 60)
 def ctx3072_sweep() -> None:
     """Batch sweep at ctx 3072 (12L/512d) — find tok/s + peak GB for the ctx-3072 repro.
