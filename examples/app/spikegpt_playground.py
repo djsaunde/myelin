@@ -21,6 +21,7 @@ import streamlit as st
 import torch
 
 from myelin import (
+    BPEVocabulary,
     ByteVocabulary,
     CharacterVocabulary,
     SamplingMode,
@@ -138,13 +139,27 @@ c3.metric("Config", f"{config.n_layer}L · {config.n_embd}d · ctx {config.conte
 c4.metric("Params", f"{n_params / 1e6:.1f}M")
 st.caption(entry["blurb"] + f"  ·  vocab={vocab.size}  ·  type={config.model_type}")
 
-default_prompt = "ROMEO:" if "shakespeare" in entry["dataset"].lower() else "The "
+if "shakespeare" in entry["dataset"].lower():
+    default_prompt = "ROMEO:"
+elif isinstance(vocab, BPEVocabulary):
+    default_prompt = "The history of"  # NB: no trailing space (see below)
+else:
+    default_prompt = "The "
 prompt = st.text_area("Prompt", value=default_prompt, height=90)
 
 if st.button("Generate", type="primary"):
     if not prompt:
         st.warning("Enter a prompt.")
         st.stop()
+    # BPE tokenizers attach a space to the *following* word (" the" is one token),
+    # so a prompt ending in a bare space is an out-of-distribution state that
+    # derails generation into junk. Strip trailing spaces for BPE models.
+    if isinstance(vocab, BPEVocabulary) and prompt != prompt.rstrip(" "):
+        prompt = prompt.rstrip(" ")
+        st.caption(
+            "ℹ️ Trailing space removed: BPE attaches spaces to the next token, so a "
+            "prompt ending in a space produces garbage. Generating from the trimmed prompt."
+        )
     prompt_ids = vocab.encode(prompt).unsqueeze(0).to(device)
     torch_device = torch.device(device)
     plen = prompt_ids.shape[1]
