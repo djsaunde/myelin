@@ -1,5 +1,19 @@
 [
   {
+    "name": "SpikeGPT 216M — WikiText-103 (beats paper)",
+    "path": "runs/spikegpt_216m_wt103_ft.best.pt",
+    "dataset": "WikiText-103 (BPE, GPT-NeoX)",
+    "metric": "test PPL 26.47 (token-level)",
+    "blurb": "The 216M headline: OpenWebText2-pretrained (10B tokens) then fine-tuned on WikiText-103. Token-level test perplexity 26.47 vs the paper's 39.75 — beats it by ~33%, with the matching GPT-NeoX tokenizer. Generates Wikipedia-style prose."
+  },
+  {
+    "name": "SpikeGPT 216M — OpenWebText2 (base LM)",
+    "path": "runs/spikegpt_216m_owt2_10b.final.pt",
+    "dataset": "OpenWebText2 (BPE, GPT-NeoX)",
+    "metric": "OWT2 held-out PPL ~27 (token-level)",
+    "blurb": "The general web-text base model before any WikiText fine-tune (final 610k-step checkpoint, 10B-token pretrain). Open-domain — best for free-form generation; not adapted to WikiText's format (its zero-shot WikiText PPL is ~94)."
+  },
+  {
     "name": "SpikeGPT enwik8 — ctx-3072 (headline, beats paper)",
     "path": "runs/spikegpt_enwik8_12L512d_ctx3072.final139k.pt",
     "dataset": "enwik8 (byte-level)",
