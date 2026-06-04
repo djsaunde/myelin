@@ -98,7 +98,22 @@ def detokenize_wikitext(text: str) -> str:
     text = re.sub(r"\s+n't\b", "n't", text)
     text = re.sub(r"([(\[])\s+", r"\1", text)  # no space after opening bracket
     text = re.sub(r"\s+([)\]])", r"\1", text)  # no space before closing bracket
-    return text
+    return _pair_double_quotes(text)
+
+
+def _pair_double_quotes(text: str) -> str:
+    """Attach spaced double quotes by alternating open/close (the Moses /
+    sacremoses / NLTK detokenizer heuristic): the 1st/3rd/… quote is opening
+    (drop the space after it), the 2nd/4th/… is closing (drop the space before).
+    Mis-pairs only on unbalanced quotes; graceful either way."""
+    parts = text.split('"')
+    if len(parts) == 1:
+        return text
+    out = parts[0]
+    for i, part in enumerate(parts[1:], start=1):
+        # odd quote = opening (drop the space after); even = closing (drop the space before)
+        out = out + '"' + part.lstrip(" ") if i % 2 == 1 else out.rstrip(" ") + '"' + part
+    return out
 
 
 def bits_color(bits: float, vmax: float = 8.0) -> str:
