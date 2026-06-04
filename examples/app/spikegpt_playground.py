@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import json
 import math
+import re
 import time
 from pathlib import Path
 from typing import cast
@@ -81,6 +82,25 @@ def token_glyph(tok: int, vocab) -> str:
     return html.escape(piece).replace("\n", "⏎\n")
 
 
+def detokenize_wikitext(text: str) -> str:
+    """Reverse WikiText's Moses/PTB surface format for readable display.
+
+    WikiText stores punctuation space-separated (" ,"), splits contractions
+    (" 's", " n't"), and encodes hyphens / decimals / thousands with the @-@ /
+    @.@ / @,@ sentinels (e.g. "Blu @-@ ray", "22 @.@ 5", "1 @,@ 000"). This
+    undoes the common, unambiguous cases; double quotes are left as-is (open vs
+    close is ambiguous)."""
+    text = text.replace(" @-@ ", "-").replace("@-@", "-")
+    text = text.replace(" @.@ ", ".").replace("@.@", ".")
+    text = text.replace(" @,@ ", ",").replace("@,@", ",")
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)  # no space before sentence punctuation
+    text = re.sub(r"\s+'(s|re|ve|ll|d|m)\b", r"'\1", text)  # possessives / contractions
+    text = re.sub(r"\s+n't\b", "n't", text)
+    text = re.sub(r"([(\[])\s+", r"\1", text)  # no space after opening bracket
+    text = re.sub(r"\s+([)\]])", r"\1", text)  # no space before closing bracket
+    return text
+
+
 def bits_color(bits: float, vmax: float = 8.0) -> str:
     # green (confident, low bits) -> red (surprised, high bits)
     f = max(0.0, min(1.0, bits / vmax))
@@ -131,6 +151,17 @@ with st.sidebar:
         "Decode them to readable characters in the generation panel. The per-byte "
         "surprisal heatmap below always shows the raw bytes the model produced.",
     )
+    if isinstance(vocab, BPEVocabulary):
+        detok_wikitext = st.checkbox(
+            "De-tokenize WikiText (readable punctuation)",
+            value=True,
+            help="WikiText stores punctuation space-separated (' ,' ' .'), splits "
+            'contractions (" \'s", " n\'t"), and uses @-@/@.@/@,@ for hyphens/decimals/'
+            "thousands. Clean those up in the generation panel for readability. The "
+            "surprisal heatmap below always shows the raw tokens the model produced.",
+        )
+    else:
+        detok_wikitext = False
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Dataset", entry["dataset"])
@@ -181,6 +212,10 @@ if st.button("Generate", type="primary"):
         # Optionally decode enwik8's HTML entities (&quot;, &lt;, …) for readability.
         shown_prompt = html.unescape(prompt) if render_entities else prompt
         shown_cont = html.unescape(continuation) if render_entities else continuation
+        # Optionally undo WikiText's Moses surface format (spaced punctuation, @-@ …).
+        if detok_wikitext:
+            shown_prompt = detokenize_wikitext(shown_prompt)
+            shown_cont = detokenize_wikitext(shown_cont)
         gen_box.markdown(
             f"<div style='font-family:monospace;white-space:pre-wrap;border:1px solid #ddd;"
             f"padding:10px;border-radius:6px'>"
