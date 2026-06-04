@@ -350,6 +350,13 @@ def main() -> None:
         help="use ordinary dense token embeddings instead of hard surrogate binary embeddings",
     )
     parser.add_argument(
+        "--no-spiking",
+        action="store_true",
+        help="ABLATION: build the continuous 'standard decoder' twin — LIF gates become "
+        "identity (vanilla RWKV-v4) and the embedding is dense. Same params; isolates "
+        "what the spiking binarization costs. Only applies to fresh runs (not --checkpoint-in).",
+    )
+    parser.add_argument(
         "--activation-checkpointing",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -424,6 +431,10 @@ def main() -> None:
             vocabulary = ByteVocabulary()
         else:
             vocabulary = BPEVocabulary.from_pretrained(args.bpe_tokenizer)
+        # --no-spiking builds the continuous twin: no LIF binarization and a dense
+        # embedding (a spiking embedding on a continuous model makes no sense).
+        spiking = not args.no_spiking
+        spike_embedding = (not args.dense_embedding) and spiking
         config = (
             SpikeGPTConfig(
                 vocab_size=vocabulary.size,
@@ -433,7 +444,8 @@ def main() -> None:
                 dropout=args.dropout,
                 model_type=args.model_type,
                 lif_threshold=args.lif_threshold,
-                spike_embedding=not args.dense_embedding,
+                spike_embedding=spike_embedding,
+                spiking=spiking,
                 gradient_checkpointing=args.activation_checkpointing,
             )
             if args.preset == "custom"
@@ -443,7 +455,8 @@ def main() -> None:
                 dropout=args.dropout,
                 model_type=args.model_type,
                 lif_threshold=args.lif_threshold,
-                spike_embedding=not args.dense_embedding,
+                spike_embedding=spike_embedding,
+                spiking=spiking,
                 gradient_checkpointing=args.activation_checkpointing,
             )
         )
@@ -532,7 +545,7 @@ def main() -> None:
         f"amp:{args.amp},matmul_precision:{args.matmul_precision},"
         f"val_eval:{args.val_eval},"
         f"compile_warmup:{args.compile_warmup},"
-        f"spike_embedding:{config.spike_embedding},"
+        f"spike_embedding:{config.spike_embedding},spiking:{config.spiking},"
         f"activation_checkpointing:{actual_activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
         f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()},"

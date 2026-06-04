@@ -235,6 +235,7 @@ class SpikeGPTConfig:
     lif_reset: float = 0.0
     surrogate_slope: float = 2.0
     spike_embedding: bool = True
+    spiking: bool = True
     gradient_checkpointing: bool = False
 
     def validate(self) -> None:
@@ -284,6 +285,7 @@ def spikegpt_config_from_preset(
     lif_reset: float = 0.0,
     surrogate_slope: float = 2.0,
     spike_embedding: bool = True,
+    spiking: bool = True,
     gradient_checkpointing: bool = False,
 ) -> SpikeGPTConfig:
     """Create a ``SpikeGPTConfig`` from a named model-size preset."""
@@ -301,6 +303,7 @@ def spikegpt_config_from_preset(
         lif_reset=lif_reset,
         surrogate_slope=surrogate_slope,
         spike_embedding=spike_embedding,
+        spiking=spiking,
         gradient_checkpointing=gradient_checkpointing,
     )
 
@@ -1050,6 +1053,30 @@ class SpikeChannelMix(nn.Module):
         return receptance * value
 
 
+class _IdentityLIF(nn.Module):
+    """Continuous passthrough with the SpikingSequenceLIF interface (config.spiking=False).
+
+    The continuous-twin ablation: outputs its input unchanged (no binarization, no
+    membrane), so each sublayer's contribution joins the residual in full precision
+    (= vanilla RWKV-v4). Implements initial_state/step so the recurrent generation
+    path also works on a continuous model (state is a carried no-op)."""
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return inputs
+
+    def initial_state(
+        self, *, batch_size: int, features: int, device: torch.device, dtype: torch.dtype
+    ) -> SpikingSequenceLIFState:
+        return SpikingSequenceLIFState(
+            membrane=torch.zeros((batch_size, features), device=device, dtype=dtype)
+        )
+
+    def step(
+        self, inputs: torch.Tensor, state: SpikingSequenceLIFState
+    ) -> tuple[torch.Tensor, SpikingSequenceLIFState]:
+        return inputs, state
+
+
 class SpikeGPTBlock(nn.Module):
     """SpikeGPT-style block with RWKV time/channel mixing and LIF activations."""
 
@@ -1070,18 +1097,22 @@ class SpikeGPTBlock(nn.Module):
             self.ffn_pre = None
             self.att = SpikeTimeMix(config.n_embd, config.n_layer, layer_id)
         self.ffn = SpikeChannelMix(config.n_embd, config.n_layer, layer_id)
-        self.lif1 = SpikingSequenceLIF(
-            tau=config.lif_tau,
-            threshold=config.lif_threshold,
-            reset=config.lif_reset,
-            surrogate_slope=config.surrogate_slope,
-        )
-        self.lif2 = SpikingSequenceLIF(
-            tau=config.lif_tau,
-            threshold=config.lif_threshold,
-            reset=config.lif_reset,
-            surrogate_slope=config.surrogate_slope,
-        )
+
+        # spiking=False is the continuous "standard decoder" twin (ablation): the LIF
+        # binarization gates become a passthrough, so each sublayer's output joins the
+        # residual in full precision (= vanilla RWKV-v4). Same params (LIF has none).
+        def _make_lif() -> SpikingSequenceLIF | _IdentityLIF:
+            if not config.spiking:
+                return _IdentityLIF()
+            return SpikingSequenceLIF(
+                tau=config.lif_tau,
+                threshold=config.lif_threshold,
+                reset=config.lif_reset,
+                surrogate_slope=config.surrogate_slope,
+            )
+
+        self.lif1 = _make_lif()
+        self.lif2 = _make_lif()
         self.dropout = nn.Dropout(config.dropout)
 
     def initial_state(
@@ -1482,6 +1513,7 @@ def spikegpt_config_from_dict(data: Mapping[str, object]) -> SpikeGPTConfig:
         lif_reset=_require_float(data.get("lif_reset", 0.0), "config.lif_reset"),
         surrogate_slope=_require_float(data.get("surrogate_slope", 2.0), "config.surrogate_slope"),
         spike_embedding=_require_bool(data.get("spike_embedding", True), "config.spike_embedding"),
+        spiking=_require_bool(data.get("spiking", True), "config.spiking"),
         gradient_checkpointing=_require_bool(
             data.get("gradient_checkpointing", False),
             "config.gradient_checkpointing",
