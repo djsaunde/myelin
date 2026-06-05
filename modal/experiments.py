@@ -33,6 +33,7 @@ image = (
     .run_commands(f"cd {REMOTE} && uv sync --frozen --extra cuda --no-install-project")
     .add_local_dir("src", f"{REMOTE}/src", copy=True)
     .add_local_dir("examples", f"{REMOTE}/examples", copy=True)
+    .add_local_file("data/enwik8", f"{REMOTE}/data/enwik8", copy=True)
     .run_commands(f"cd {REMOTE} && uv sync --frozen --extra cuda")
 )
 
@@ -305,6 +306,83 @@ def wkv_step_ab() -> None:
         "print(f'216M eager step  fp32-I/O WKV {ms_f32:.2f} ms  |  "
         "bf16-I/O WKV {ms_bf:.2f} ms  ({ms_f32/ms_bf:.3f}x, -{(1-ms_bf/ms_f32)*100:.1f}%)')"
     )
+
+
+@app.function(gpu=GPU, timeout=60 * 60)
+def arch_ablation_ab() -> None:
+    """3-way architecture A/B on enwik8 (byte-level): spiking vs continuous vs
+    spike-input, same model/data/recipe. Answers what the spiking placement costs:
+
+    * spiking      — canonical Linear->LIF (spikes added to a continuous residual).
+    * continuous   — LIF gates removed (vanilla RWKV-v4; the upper bound on quality).
+    * spike-input  — LIF->Linear (projections consume spikes; the AC-capable,
+                     'hardware-faithful' placement that could earn the energy win).
+
+    Small 6L/512d, 4k steps each; prints the last few val-eval rows per variant so
+    the convergence ordering is directly readable (byte-level => Val BPC).
+    """
+    import subprocess
+
+    common = [
+        VENV_PY,
+        "examples/train_tiny_spikegpt.py",
+        "--device",
+        "cuda",
+        "--vocab",
+        "byte",
+        "--text-file",
+        "data/enwik8",
+        "--preset",
+        "custom",
+        "--layers",
+        "6",
+        "--embedding",
+        "512",
+        "--context-length",
+        "1024",
+        "--batch",
+        "16",
+        "--steps",
+        "4000",
+        "--lr",
+        "1e-3",
+        "--lr-final",
+        "1e-4",
+        "--warmup-steps",
+        "200",
+        "--amp",
+        "bf16",
+        "--matmul-precision",
+        "high",
+        "--compile",
+        "regional",
+        "--compile-mode",
+        "max-autotune-no-cudagraphs",
+        "--compile-warmup",
+        "--eval-every",
+        "500",
+        "--eval-batches",
+        "16",
+        "--log-every",
+        "1000",
+    ]
+    variants = [
+        ("spiking (canonical Linear->LIF)", []),
+        ("continuous (no spikes)", ["--no-spiking"]),
+        ("spike-input (LIF->Linear)", ["--spike-input"]),
+    ]
+    for name, flags in variants:
+        print(f"\n========== {name} ==========", flush=True)
+        out = subprocess.run(common + flags, cwd=REMOTE, capture_output=True, text=True)
+        rows = [ln for ln in out.stdout.splitlines() if ln.startswith("| ") and ln.count("|") >= 6]
+        val_rows = [ln for ln in rows if ln.split("|")[3].strip()]  # Val Loss column non-empty
+        if val_rows:
+            print("Step | TrainLoss | ValLoss | ValBPC | ValPPL ... (last 4 val evals):")
+            print("\n".join(val_rows[-4:]))
+        else:
+            print("no val rows parsed; stdout tail:\n", out.stdout[-1500:])
+        if out.returncode != 0:
+            print("returncode", out.returncode, "STDERR tail:\n", out.stderr[-1500:])
 
 
 @app.function(gpu=GPU, timeout=50 * 60)
