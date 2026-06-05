@@ -236,6 +236,7 @@ class SpikeGPTConfig:
     surrogate_slope: float = 2.0
     spike_embedding: bool = True
     spiking: bool = True
+    spike_input: bool = False
     gradient_checkpointing: bool = False
 
     def validate(self) -> None:
@@ -286,6 +287,7 @@ def spikegpt_config_from_preset(
     surrogate_slope: float = 2.0,
     spike_embedding: bool = True,
     spiking: bool = True,
+    spike_input: bool = False,
     gradient_checkpointing: bool = False,
 ) -> SpikeGPTConfig:
     """Create a ``SpikeGPTConfig`` from a named model-size preset."""
@@ -304,6 +306,7 @@ def spikegpt_config_from_preset(
         surrogate_slope=surrogate_slope,
         spike_embedding=spike_embedding,
         spiking=spiking,
+        spike_input=spike_input,
         gradient_checkpointing=gradient_checkpointing,
     )
 
@@ -1152,6 +1155,10 @@ class SpikeGPTBlock(nn.Module):
         if inputs.ndim != 2:
             msg = f"inputs must have shape [B, C]; got {inputs.shape}"
             raise ValueError(msg)
+        if self.config.spike_input:
+            # The recurrent generation path for the LIF->Linear variant isn't wired
+            # yet; the training/eval path (forward) is. Add it before generating.
+            raise NotImplementedError("spike_input does not support the recurrent step() path yet")
         residual = self.ln0(inputs) if self.ln0 is not None else inputs
         if self.ffn_pre is not None:
             if state.ffn_pre is None:
@@ -1178,13 +1185,27 @@ class SpikeGPTBlock(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         residual = self.ln0(inputs) if self.ln0 is not None else inputs
+        # spike_input=True is the "hardware-faithful" LIF->Linear variant: the LIF
+        # spikes each sub-block's INPUT, so the projections consume spikes (the
+        # AC-capable placement the paper's energy table assumes) instead of spiking
+        # the output (Linear->LIF, the canonical default). See spikegpt_216m_energy.md.
+        spike_in = self.config.spike_input
         if self.ffn_pre is not None:
-            residual = residual + self.lif1(self.ffn_pre(self.ln1(residual)))
+            normed = self.ln1(residual)
+            residual = residual + (
+                self.ffn_pre(self.lif1(normed)) if spike_in else self.lif1(self.ffn_pre(normed))
+            )
         else:
             if self.att is None:
                 raise RuntimeError("SpikeGPTBlock has no time-mix module")
-            residual = residual + self.lif1(self.att(self.ln1(residual)))
-        residual = residual + self.lif2(self.ffn(self.ln2(residual)))
+            normed = self.ln1(residual)
+            residual = residual + (
+                self.att(self.lif1(normed)) if spike_in else self.lif1(self.att(normed))
+            )
+        normed2 = self.ln2(residual)
+        residual = residual + (
+            self.ffn(self.lif2(normed2)) if spike_in else self.lif2(self.ffn(normed2))
+        )
         return self.dropout(residual)
 
 
@@ -1514,6 +1535,7 @@ def spikegpt_config_from_dict(data: Mapping[str, object]) -> SpikeGPTConfig:
         surrogate_slope=_require_float(data.get("surrogate_slope", 2.0), "config.surrogate_slope"),
         spike_embedding=_require_bool(data.get("spike_embedding", True), "config.spike_embedding"),
         spiking=_require_bool(data.get("spiking", True), "config.spiking"),
+        spike_input=_require_bool(data.get("spike_input", False), "config.spike_input"),
         gradient_checkpointing=_require_bool(
             data.get("gradient_checkpointing", False),
             "config.gradient_checkpointing",

@@ -357,6 +357,14 @@ def main() -> None:
         "what the spiking binarization costs. Only applies to fresh runs (not --checkpoint-in).",
     )
     parser.add_argument(
+        "--spike-input",
+        action="store_true",
+        help="ABLATION: 'hardware-faithful' LIF->Linear variant — spike each sub-block's "
+        "INPUT so the projections consume spikes (the AC-capable placement the paper's "
+        "energy table assumes), vs the canonical Linear->LIF. Measures the accuracy cost "
+        "of making SpikeGPT actually energy-efficient. Fresh runs only; no generation yet.",
+    )
+    parser.add_argument(
         "--activation-checkpointing",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -433,8 +441,10 @@ def main() -> None:
             vocabulary = BPEVocabulary.from_pretrained(args.bpe_tokenizer)
         # --no-spiking builds the continuous twin: no LIF binarization and a dense
         # embedding (a spiking embedding on a continuous model makes no sense).
+        # --spike-input flips the LIF placement to LIF->Linear (hardware-faithful).
         spiking = not args.no_spiking
         spike_embedding = (not args.dense_embedding) and spiking
+        spike_input = args.spike_input and spiking
         config = (
             SpikeGPTConfig(
                 vocab_size=vocabulary.size,
@@ -446,6 +456,7 @@ def main() -> None:
                 lif_threshold=args.lif_threshold,
                 spike_embedding=spike_embedding,
                 spiking=spiking,
+                spike_input=spike_input,
                 gradient_checkpointing=args.activation_checkpointing,
             )
             if args.preset == "custom"
@@ -457,6 +468,7 @@ def main() -> None:
                 lif_threshold=args.lif_threshold,
                 spike_embedding=spike_embedding,
                 spiking=spiking,
+                spike_input=spike_input,
                 gradient_checkpointing=args.activation_checkpointing,
             )
         )
@@ -546,6 +558,7 @@ def main() -> None:
         f"val_eval:{args.val_eval},"
         f"compile_warmup:{args.compile_warmup},"
         f"spike_embedding:{config.spike_embedding},spiking:{config.spiking},"
+        f"spike_input:{config.spike_input},"
         f"activation_checkpointing:{actual_activation_checkpointing},"
         f"vocab_size:{vocabulary.size},"
         f"train_tokens:{train_tokens.numel()},val_tokens:{val_tokens.numel()},"
