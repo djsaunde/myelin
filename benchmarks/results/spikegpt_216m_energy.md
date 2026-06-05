@@ -60,6 +60,26 @@ on GPU the spiking layers are **mostly cost, little realized benefit**. The win 
 only available on hypothetical event-driven hardware *after* restructuring to
 LIF→Linear (which would change the architecture and require retraining).
 
+## Empirical confirmation: the energy-realizing placement costs the most accuracy
+
+The energy win is only available *after* restructuring to `LIF→Linear` (spikes
+feed the projections). We built that variant (`config.spike_input`) and ran a
+3-way A/B (Modal `arch_ablation_ab`, 6L/512d, enwik8 byte-level, 4k steps, same
+recipe). Val BPC (lower = better):
+
+| variant | Val BPC @ 4k | vs continuous | block firing rate |
+|---|---:|---:|---:|
+| continuous (no spikes) | **1.467** | — | ~0 |
+| spiking (canonical `Linear→LIF`) | 1.597 | +0.130 (+8.9%) | 0.21 |
+| spike-input (`LIF→Linear`, hardware-faithful) | 1.618 | +0.151 (+10.3%) | 0.32 |
+
+The placement whose matmuls are genuinely spike-driven AC (`spike-input`) is the
+**worst** for accuracy — worse even than canonical spiking, which already trails
+the continuous model. And its firing rate is *higher* (0.32 vs 0.21), shrinking
+even the realizable AC saving. So SpikeGPT's efficiency and quality pull in
+opposite directions: making the energy win real costs ~10% BPC on top of an
+architecture that, as-built, doesn't realize the win at all.
+
 ## Caveats
 - The headline factor varies by source: 20× ops (abstract) / 32.2× (v5 Table 1) /
   "5× energy" (press). It is an **operations** projection, not measured energy.
