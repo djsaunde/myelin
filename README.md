@@ -8,11 +8,6 @@ required dependency and the correctness oracle; Triton is the optional CUDA
 backend for fused-time kernels. The package ships `py.typed`; inputs are
 time-major `[T, B, N]`.
 
-> The SpikeGPT language-model reproduction that previously lived here now lives
-> in its own repository,
-> [spikegpt-myelin](https://github.com/djsaunde/spikegpt-myelin), which depends
-> on this package.
-
 ## Main takeaway
 
 **`torch.compile` is the baseline to beat, and so far it wins.** Inductor fuses
