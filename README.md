@@ -8,13 +8,14 @@ required dependency and the correctness oracle; Triton is the optional CUDA
 backend for fused-time kernels. The package ships `py.typed`; inputs are
 time-major `[T, B, N]`.
 
-> The SpikeGPT language-model reproduction that previously lived here now has its
-> own repository — [spikegpt-myelin](https://github.com/djsaunde/spikegpt-myelin)
-> — which depends on this package.
+> The SpikeGPT language-model reproduction that previously lived here now lives
+> in its own repository,
+> [spikegpt-myelin](https://github.com/djsaunde/spikegpt-myelin), which depends
+> on this package.
 
 ## Main takeaway
 
-**`torch.compile` is the baseline to beat — and so far it wins.** Inductor fuses
+**`torch.compile` is the baseline to beat, and so far it wins.** Inductor fuses
 the time loop, shortens buffer lifetimes, and captures the whole scalar loss, so
 compiled PyTorch is often the fastest *and* lowest-memory path. On the RTX 5090
 frontier (`benchmarks/results/performance_frontier_5090.md`), our Triton training
@@ -25,7 +26,7 @@ compiled hard-LIF), memory (checkpointed recompute, rate-only readouts that neve
 materialize `[T, B, N]` spikes), and packed/distributed spike reductions.
 
 So treat `torch.compile` as the default and reach for Triton for one of those
-contract changes — not as a faster drop-in. Full rationale:
+contract changes, not as a faster drop-in. Full rationale:
 [docs/training_recommendation.md](docs/training_recommendation.md); milestones:
 [docs/roadmap.md](docs/roadmap.md).
 
@@ -49,16 +50,16 @@ uv run ruff format --check . && uv run ruff check . && uv run pyright \
 
 ## Package map
 
-- `myelin.neurons` / `myelin.functional` — correctness-first neuron dynamics (the
+- `myelin.neurons` / `myelin.functional`: correctness-first neuron dynamics (the
   oracle) and unfused PyTorch reference simulations.
-- `myelin.kernels` — stable backend-dispatched forward/training entry points.
-- `myelin.triton` / `myelin.autograd` — raw Triton kernels and the custom
+- `myelin.kernels`: stable backend-dispatched forward/training entry points.
+- `myelin.triton` / `myelin.autograd`: raw Triton kernels and the custom
   autograd boundaries the dispatchers use.
-- `myelin.modules` — small PyTorch training modules over the kernel paths.
-- `myelin.packing` / `myelin.distributed` — bitpacked spikes (32 per int32 word)
+- `myelin.modules`: small PyTorch training modules over the kernel paths.
+- `myelin.packing` / `myelin.distributed`: bitpacked spikes (32 per int32 word)
   and packed all-gather / count-rate all-reduce helpers.
-- `myelin.online` — e-prop/OSTL-style online eligibility-trace rules.
-- `myelin.hardware` — JSON hardware-bridge export (dense LIF → quantized →
+- `myelin.online`: e-prop/OSTL-style online eligibility-trace rules.
+- `myelin.hardware`: JSON hardware-bridge export (dense LIF → quantized →
   placement → bundle manifest, plus a SpiNNaker 2 adapter).
 
 ## Backends
