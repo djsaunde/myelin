@@ -49,9 +49,6 @@ def test_base_package_imports_without_cuda_extras() -> None:
     assert myelin.linear_surrogate_lif_packed_forward
     assert myelin.LinearSurrogateLIFPacked
     assert myelin.LinearSurrogateLIFRate
-    assert myelin.SpikeGPTModelType
-    assert myelin.SpikeGPTPreset
-    assert myelin.SamplingMode
     assert myelin.recommended_checkpoint_size(100) == 25
 
 

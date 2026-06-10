@@ -1,10 +1,10 @@
 """Prototype: bf16-I/O surrogate-LIF kernel with an fp32 membrane carry.
 
 The production kernel (``lif.py``) computes the recurrence in the I/O dtype, so
-``SpikingSequenceLIF`` upcasts bf16 inputs to fp32 before calling it (to keep the
-loop-carried membrane in fp32). That doubles the LIF's memory traffic under bf16
-autocast. Here the loads are cast to fp32 in-register, so the membrane carry is
-fp32 while inputs / spikes / pre-reset stay bf16 — halving the bandwidth of the
+callers upcast bf16 inputs to fp32 before calling it (to keep the loop-carried
+membrane in fp32). That doubles the LIF's memory traffic under bf16 autocast.
+Here the loads are cast to fp32 in-register, so the membrane carry is fp32 while
+inputs / spikes / pre-reset stay bf16 — halving the bandwidth of the
 ~23%-of-step LIF. ``pre_reset`` is stored bf16 (used by the surrogate backward),
 which trades a little gradient precision for bandwidth; parity is validated
 against the eager loop oracle on Modal before this is promoted into ``lif.py``.
@@ -140,162 +140,6 @@ def surrogate_lif_bf16io(
 ) -> torch.Tensor:
     """Spikes from the bf16-I/O / fp32-carry surrogate LIF (CUDA only)."""
     _, spikes = _BF16LIF.apply(
-        inputs,
-        initial.membrane,
-        params.decay,
-        params.threshold,
-        params.reset,
-        surrogate_slope,
-        surrogate_id,
-        block_size,
-    )
-    return spikes
-
-
-if has_triton():
-    import triton
-    import triton.language as tl
-
-    from myelin.triton.lif import _surrogate_derivative
-
-    @triton.jit
-    def _fwd_kernel_btc(
-        inputs_ptr,
-        initial_ptr,
-        final_ptr,
-        spikes_ptr,
-        pre_reset_ptr,
-        T,
-        C,
-        decay: tl.constexpr,
-        threshold: tl.constexpr,
-        reset: tl.constexpr,
-        BLOCK: tl.constexpr,
-    ):
-        # Batch-major [B, T, C]: one program per (batch, channel-block), looping
-        # time — same access pattern as the WKV kernel, so the caller passes the
-        # native [B, T, C] tensor with no movedim/contiguous transpose.
-        pid_b = tl.program_id(0)
-        cs = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
-        mask = cs < C
-        base = pid_b * T * C
-        membrane = tl.load(initial_ptr + pid_b * C + cs, mask=mask, other=0.0).to(tl.float32)
-        for t in range(T):
-            off = base + t * C + cs
-            cur = tl.load(inputs_ptr + off, mask=mask, other=0.0).to(tl.float32)
-            membrane = membrane * decay + cur
-            spike = membrane >= threshold
-            tl.store(pre_reset_ptr + off, membrane, mask=mask)
-            tl.store(spikes_ptr + off, spike.to(tl.float32), mask=mask)
-            membrane = tl.where(spike, reset, membrane)
-        tl.store(final_ptr + pid_b * C + cs, membrane, mask=mask)
-
-    @triton.jit
-    def _bwd_kernel_btc(
-        pre_reset_ptr,
-        spikes_ptr,
-        grad_final_ptr,
-        grad_spikes_ptr,
-        grad_inputs_ptr,
-        grad_initial_ptr,
-        T,
-        C,
-        decay: tl.constexpr,
-        threshold: tl.constexpr,
-        reset: tl.constexpr,
-        surrogate_slope: tl.constexpr,
-        surrogate_id: tl.constexpr,
-        BLOCK: tl.constexpr,
-    ):
-        pid_b = tl.program_id(0)
-        cs = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
-        mask = cs < C
-        base = pid_b * T * C
-        grad_membrane = tl.load(grad_final_ptr + pid_b * C + cs, mask=mask, other=0.0)
-        grad_membrane = grad_membrane.to(tl.float32)
-        for reverse_t in range(T):
-            t = T - 1 - reverse_t
-            off = base + t * C + cs
-            pre_reset = tl.load(pre_reset_ptr + off, mask=mask, other=0.0).to(tl.float32)
-            spike = tl.load(spikes_ptr + off, mask=mask, other=0.0).to(tl.float32)
-            grad_spike = tl.load(grad_spikes_ptr + off, mask=mask, other=0.0).to(tl.float32)
-            centered = surrogate_slope * (pre_reset - threshold)
-            d = surrogate_slope * _surrogate_derivative(centered, surrogate_id)
-            grad_pre = grad_membrane * ((1.0 - spike) + (reset - pre_reset) * d) + grad_spike * d
-            tl.store(grad_inputs_ptr + off, grad_pre, mask=mask)
-            grad_membrane = grad_pre * decay
-        tl.store(grad_initial_ptr + pid_b * C + cs, grad_membrane, mask=mask)
-
-    class _BF16LIFBTC(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, inputs, initial, decay, threshold, reset, slope, surrogate_id, block):
-            # inputs: [B, T, C]; initial: [B, C].
-            inp = inputs.contiguous()
-            init = initial.contiguous()
-            b, t, c = inp.shape
-            final = torch.empty_like(init)
-            spikes = torch.empty_like(inp)
-            pre = torch.empty_like(inp)
-            grid = (b, triton.cdiv(c, block))
-            _fwd_kernel_btc[grid](
-                inp, init, final, spikes, pre, t, c, decay, threshold, reset, block
-            )
-            ctx.save_for_backward(pre, spikes)
-            ctx.meta = (decay, threshold, reset, slope, surrogate_id, block)
-            return final, spikes
-
-        @staticmethod
-        def backward(ctx, *grad_outputs):
-            grad_final, grad_spikes = grad_outputs
-            pre, spikes = ctx.saved_tensors
-            decay, threshold, reset, slope, sid, block = ctx.meta
-            b, t, c = spikes.shape
-            gi = torch.empty_like(spikes)
-            g0 = torch.empty_like(grad_final.contiguous())
-            grid = (b, triton.cdiv(c, block))
-            _bwd_kernel_btc[grid](
-                pre,
-                spikes,
-                grad_final.contiguous(),
-                grad_spikes.contiguous(),
-                gi,
-                g0,
-                t,
-                c,
-                decay,
-                threshold,
-                reset,
-                slope,
-                sid,
-                block,
-            )
-            return gi, g0, None, None, None, None, None, None
-
-
-def surrogate_lif_bf16io_btc(
-    inputs: torch.Tensor,
-    initial: LIFState,
-    params: LIFParams,
-    *,
-    surrogate_slope: float = 2.0,
-    surrogate_id: int = 2,
-    block_size: int = 128,
-) -> torch.Tensor:
-    """Batch-major [B, T, C] bf16-I/O surrogate LIF — no movedim transpose.
-
-    Equivalent to :func:`surrogate_lif_bf16io` but consumes/produces the model's
-    native ``[B, T, C]`` layout directly (one program per (batch, channel-block)),
-    eliminating the ``movedim(1, 0).contiguous()`` transpose copies on input and
-    output that showed up as ~part of the profiler's copy overhead.
-
-    **Measured a dead end** (Modal sm_120, ``lif_bf16io_btc_validate``): bit-exact
-    with the [T, B, C] kernel (spikes + grads identical), but ~10% *slower* fwd+bwd
-    at the 216M dims — the per-(batch, channel) access pattern costs more than the
-    two transposes it removes (those are cheap). Kept for the record; not wired into
-    ``SpikingSequenceLIF``. The copy overhead worth chasing is the WKV fp32 upcast,
-    not the LIF layout.
-    """
-    _, spikes = _BF16LIFBTC.apply(
         inputs,
         initial.membrane,
         params.decay,

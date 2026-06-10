@@ -54,14 +54,6 @@ compare = [
 cloud = [
     "modal",
 ]
-app = [
-    "streamlit>=1.40",
-]
-tokenization = [
-    "tokenizers>=0.15",
-    "huggingface-hub>=0.20",
-    "datasets>=2.18",
-]
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
