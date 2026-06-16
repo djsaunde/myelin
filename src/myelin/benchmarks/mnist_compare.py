@@ -20,7 +20,6 @@ class Variant:
     name: str
     script: str
     extra_args: tuple[str, ...] = ()
-    is_snntorch: bool = False
     uses_rate_readout: bool = False
     supports_compile: bool = True
 
@@ -56,18 +55,6 @@ VARIANTS = {
         uses_rate_readout=True,
     ),
     "conv": Variant("conv", "train_mnist_conv.py"),
-    "snntorch_dense": Variant(
-        "snntorch_dense",
-        "train_mnist_snntorch.py",
-        extra_args=("--model", "dense"),
-        is_snntorch=True,
-    ),
-    "snntorch_conv": Variant(
-        "snntorch_conv",
-        "train_mnist_snntorch.py",
-        extra_args=("--model", "conv"),
-        is_snntorch=True,
-    ),
 }
 
 COMPILE_POLICY_SCRIPTS = frozenset({"train_mnist.py", "train_mnist_rate.py", "train_mnist_conv.py"})
@@ -132,13 +119,9 @@ def run_variant(args: argparse.Namespace, variant: Variant) -> Result:
         command.extend(["--grad-clip", str(args.grad_clip)])
     if variant.uses_rate_readout:
         command.extend(["--checkpoint-size", str(args.rate_checkpoint_size)])
-    if variant.is_snntorch:
-        command.extend(["--beta", str(args.snntorch_beta)])
     if variant.script == "train_mnist_conv.py" and args.conv_synapse_init is not None:
         command.extend(["--synapse-init", args.conv_synapse_init])
-    compile_variant = (
-        args.compile or (args.compile_myelin_only and not variant.is_snntorch)
-    ) and variant.supports_compile
+    compile_variant = (args.compile or args.compile_myelin_only) and variant.supports_compile
     if compile_variant:
         if variant.script in COMPILE_POLICY_SCRIPTS:
             command.extend(["--compile", "on"])
@@ -200,7 +183,6 @@ def print_markdown(args: argparse.Namespace, results: list[Result]) -> None:
     print(f"- `compile_myelin_only`: `{args.compile_myelin_only}`")
     print(f"- `conv_synapse_init`: `{args.conv_synapse_init}`")
     print(f"- `matmul_precision`: `{args.matmul_precision}`")
-    print(f"- `snntorch_beta`: `{args.snntorch_beta}`")
     print()
     print("## Results")
     print()
@@ -275,7 +257,6 @@ def main() -> None:
     parser.add_argument("--grad-clip", type=float)
     parser.add_argument("--rate-checkpoint-size", type=parse_checkpoint_size, default="balanced")
     parser.add_argument("--surrogate-slope", type=float, default=5.0)
-    parser.add_argument("--snntorch-beta", type=float, default=0.95)
     parser.add_argument(
         "--matmul-precision",
         choices=("highest", "high", "medium"),

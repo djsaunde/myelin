@@ -48,9 +48,6 @@ dev = [
 tracking = [
     "wandb",
 ]
-compare = [
-    "snntorch>=0.9.4",
-]
 cloud = [
     "modal",
 ]

@@ -922,9 +922,6 @@ bench = [
 cloud = [
     { name = "modal" },
 ]
-compare = [
-    { name = "snntorch" },
-]
 cuda = [
     { name = "triton", version = "3.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "triton", version = "3.7.0+git88b227e2", source = { registry = "https://download.pytorch.org/whl/nightly/cu130" }, marker = "sys_platform == 'linux'" },
@@ -948,14 +945,13 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "snntorch", marker = "extra == 'compare'", specifier = ">=0.9.4" },
     { name = "torch", specifier = ">=2.13.0.dev0", index = "https://download.pytorch.org/whl/nightly/cu130" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/nightly/cu130" },
     { name = "triton", marker = "sys_platform == 'linux' and extra == 'cuda'", index = "https://download.pytorch.org/whl/nightly/cu130" },
     { name = "triton", marker = "sys_platform != 'linux' and extra == 'cuda'" },
     { name = "wandb", marker = "extra == 'tracking'" },
 ]
-provides-extras = ["cuda", "bench", "dev", "tracking", "compare", "cloud"]
+provides-extras = ["cuda", "bench", "dev", "tracking", "cloud"]
 
 [[package]]
 name = "networkx"
@@ -1712,15 +1708,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz", hash = "sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c", size = 22506, upload-time = "2026-03-09T03:43:26.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl", hash = "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f", size = 24390, upload-time = "2026-03-09T03:43:24.361Z" },
-]
-
-[[package]]
-name = "snntorch"
-version = "0.9.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/a7/ce6eec2007d505612bc2bfc297d05daf9e507748d7d4a2406cae0d2a5e32/snntorch-0.9.4.tar.gz", hash = "sha256:eaa0dd46675c471bf0b616068ee777564377bcb46b2104840a4ff4332de01909", size = 95103, upload-time = "2025-02-16T21:26:01.332Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/a6/c9ca7a9a335a302694f0a86d5235fcba797283f94d5cd835e1dc8efdc905/snntorch-0.9.4-py2.py3-none-any.whl", hash = "sha256:34805e8d9d3d50fa8d28eb8ee715d9196a4db115cefe497e026b3ce1b7884388", size = 125619, upload-time = "2025-02-16T21:25:59.057Z" },
 ]
 
 [[package]]

@@ -19,7 +19,6 @@ Runs the repo MNIST examples with matched training knobs.
 - `compile_myelin_only`: `True`
 - `conv_synapse_init`: `None`
 - `matmul_precision`: `highest`
-- `snntorch_beta`: `0.95`
 
 ## Results
 

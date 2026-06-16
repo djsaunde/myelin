@@ -138,7 +138,6 @@ def main() -> None:
     parser.add_argument("--grad-clip", type=float, default=0.1)
     parser.add_argument("--rate-checkpoint-size", type=parse_checkpoint_size, default="balanced")
     parser.add_argument("--surrogate-slope", type=float, default=5.0)
-    parser.add_argument("--snntorch-beta", type=float, default=0.95)
     parser.add_argument(
         "--matmul-precision",
         choices=("highest", "high", "medium"),

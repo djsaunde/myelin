@@ -24,9 +24,9 @@ uv run pytest
 
 `myelin` requires torch 2.13 (currently a nightly); `pyproject.toml` pulls
 torch/torchvision/triton from the PyTorch nightly CUDA index automatically. Core
-deps are `torch`, `torchvision`, `numpy`; CUDA/Triton, benchmark comparison, and
-W&B tracking are optional extras (`--extra cuda --extra compare --extra
-tracking`). The CPU CI gate runs locally as:
+deps are `torch`, `torchvision`, `numpy`; CUDA/Triton and W&B tracking are
+optional extras (`--extra cuda --extra tracking`). The CPU CI gate runs locally
+as:
 
 ```bash
 uv run ruff format --check . && uv run ruff check . && uv run pyright \

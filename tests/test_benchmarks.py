@@ -61,13 +61,6 @@ from myelin.benchmarks.online_learning import (
 from myelin.benchmarks.performance_frontier import run_benchmark as run_frontier_benchmark
 from myelin.benchmarks.runner import PRESETS, make_runs
 from myelin.benchmarks.scalar_loss_boundary import ScalarLossResult
-from myelin.benchmarks.snntorch_matrix import (
-    TimestepSetting,
-    parse_timesteps,
-)
-from myelin.benchmarks.snntorch_matrix import (
-    run_matrix as run_snntorch_matrix,
-)
 from myelin.benchmarks.training_breakdown import run_benchmark as run_training_breakdown
 from myelin.benchmarks.two_layer_recompute import (
     BenchRow as TwoLayerBenchRow,
@@ -501,7 +494,6 @@ def test_mnist_compare_threads_checkpoint_size_to_rate_variants(
         test_limit=32,
         grad_clip=0.1,
         rate_checkpoint_size="memory",
-        snntorch_beta=0.95,
         conv_synapse_init=None,
         compile=True,
         compile_myelin_only=False,
@@ -551,7 +543,6 @@ def test_mnist_rate_matrix_threads_settings_and_variants(monkeypatch: pytest.Mon
         test_limit=32,
         grad_clip=0.1,
         rate_checkpoint_size="memory",
-        snntorch_beta=0.95,
         conv_synapse_init=None,
         compile=False,
         compile_myelin_only=True,
@@ -650,89 +641,13 @@ def test_headline_collects_saved_artifact_summary(tmp_path) -> None:
             ]
         )
     )
-    (tmp_path / "snntorch_matrix_5090.md").write_text(
-        "\n".join(
-            [
-                "| T | Comparison | Steady Step Speedup | Peak Memory Ratio |",
-                "|---:|---|---:|---:|",
-                "| 50 | rate vs snntorch_dense | 50.42x | 1.23x |",
-                "| 50 | conv vs snntorch_conv | 11.81x | 1.22x |",
-            ]
-        )
-    )
-
     rows = collect_headlines(tmp_path)
 
-    assert [row.status for row in rows] == ["ok", "ok", "ok", "ok", "ok", "ok"]
+    assert [row.status for row in rows] == ["ok", "ok", "ok", "ok", "ok"]
     assert "95.51%" in rows[0].headline
     assert "110.3 MB vs triton_compile 44.0 MB" in rows[2].headline
-    assert "50.42x" in rows[3].headline
-    assert "2.46x" in rows[4].headline
-    assert "0.511 ms" in rows[5].headline
-
-
-def test_snntorch_matrix_parses_timesteps() -> None:
-    assert parse_timesteps("25") == TimestepSetting(25)
-
-
-def test_snntorch_matrix_threads_timesteps_and_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    commands: list[list[str]] = []
-    args = argparse.Namespace(
-        variant=["rate", "snntorch_dense"],
-        timesteps=[TimestepSetting(10), TimestepSetting(25)],
-        data_dir="data",
-        device="cpu",
-        encoding="poisson",
-        batch=8,
-        hidden=16,
-        epochs=1,
-        lr=0.001,
-        grad_clip=0.1,
-        rate_checkpoint_size="balanced",
-        surrogate_slope=5.0,
-        snntorch_beta=0.95,
-        matmul_precision="highest",
-        smooth_forward=False,
-        compile=False,
-        compile_myelin_only=True,
-        conv_synapse_init="fan_in",
-        log_every=100,
-        eval_every=100,
-        eval_batches=1,
-        train_limit=32,
-        test_limit=32,
-    )
-
-    def fake_run(command: list[str], **_kwargs: object) -> object:
-        commands.append(command)
-
-        class Completed:
-            returncode = 0
-            stdout = (
-                "final_test_loss=1.0\n"
-                "final_test_accuracy=0.5\n"
-                "peak_cuda_memory_mb=10.0\n"
-                "steady_state_average_step_ms=2.0\n"
-            )
-            stderr = ""
-
-        return Completed()
-
-    monkeypatch.setattr("subprocess.run", fake_run)
-
-    rows = run_snntorch_matrix(args)
-
-    assert [row.setting.timesteps for row in rows] == [10, 10, 25, 25]
-    assert [row.result.name for row in rows] == [
-        "rate",
-        "snntorch_dense",
-        "rate",
-        "snntorch_dense",
-    ]
-    assert commands[0][commands[0].index("--timesteps") + 1] == "10"
-    assert commands[2][commands[2].index("--timesteps") + 1] == "25"
-    assert "--compile" in commands[0]
-    assert "--compile" not in commands[1]
+    assert "2.46x" in rows[3].headline
+    assert "0.511 ms" in rows[4].headline
 
 
 def test_two_layer_recompute_parses_shape() -> None:

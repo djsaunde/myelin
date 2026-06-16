@@ -175,34 +175,6 @@ def summarize_compile_boundary(results_dir: Path) -> HeadlineRow:
     return HeadlineRow("Compile/Triton Boundary", headline, artifact)
 
 
-def summarize_snntorch_matrix(results_dir: Path) -> HeadlineRow:
-    artifact = "snntorch_matrix_5090.md"
-    try:
-        rows = parse_markdown_table(read_artifact(results_dir, artifact), "| T | Comparison |")
-        rate_t50 = next(
-            row
-            for row in rows
-            if row["T"] == "50" and row["Comparison"] == "rate vs snntorch_dense"
-        )
-        conv_t50 = next(
-            row for row in rows if row["T"] == "50" and row["Comparison"] == "conv vs snntorch_conv"
-        )
-    except (FileNotFoundError, KeyError, StopIteration) as exc:
-        return HeadlineRow(
-            "myelin vs snnTorch",
-            f"missing or invalid artifact: {type(exc).__name__}",
-            artifact,
-            "missing",
-        )
-
-    headline = (
-        f"T=50 steady-step speedups: rate {rate_t50['Steady Step Speedup']}, "
-        f"conv {conv_t50['Steady Step Speedup']}; "
-        f"rate memory ratio {rate_t50['Peak Memory Ratio']}"
-    )
-    return HeadlineRow("myelin vs snnTorch", headline, artifact)
-
-
 def collect_headlines(results_dir: Path) -> list[HeadlineRow]:
     return [
         summarize_quality_artifact(
@@ -218,7 +190,6 @@ def collect_headlines(results_dir: Path) -> list[HeadlineRow]:
             extra="regularized conv SNN",
         ),
         summarize_mnist_rate_matrix(results_dir),
-        summarize_snntorch_matrix(results_dir),
         summarize_performance_frontier(results_dir),
         summarize_compile_boundary(results_dir),
     ]
