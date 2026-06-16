@@ -4,8 +4,8 @@ Fast spiking neural network simulation with PyTorch.
 
 `myelin` targets the bottleneck that dominates many SNN training workloads:
 Python-side time loops and per-timestep GPU kernel launches. PyTorch is a
-required dependency and the correctness oracle. In practice **`torch.compile` is
-the strong default**: Inductor fuses the time loop, shortens buffer lifetimes,
+required dependency and the correctness oracle. In practice `torch.compile` is
+the strong default: Inductor fuses the time loop, shortens buffer lifetimes,
 and captures the scalar loss, so compiled PyTorch is often the fastest *and*
 lowest-memory path. The optional Triton backend earns its place for the cases
 compile cannot infer from ordinary dense tensors: memory (checkpointed recompute,
@@ -22,7 +22,7 @@ uv sync --extra dev
 uv run pytest
 ```
 
-`myelin` requires **torch 2.13** (currently a nightly); `pyproject.toml` pulls
+`myelin` requires torch 2.13 (currently a nightly); `pyproject.toml` pulls
 torch/torchvision/triton from the PyTorch nightly CUDA index automatically. Core
 deps are `torch`, `torchvision`, `numpy`; CUDA/Triton, benchmark comparison, and
 W&B tracking are optional extras (`--extra cuda --extra compare --extra
@@ -63,9 +63,9 @@ never stores dense spikes. Built-in surrogates: `sigmoid`, `fast_sigmoid`,
 
 ## Custom neurons (DSL, experimental)
 
-> **Partial.** Generated Triton kernels currently cover **pointwise fused-time
-> forward only**, and generated **backward is limited to hard-reset LIF-shaped
-> IRs**. Anything outside that boundary falls back to the PyTorch reference path,
+> Partial. Generated Triton kernels currently cover pointwise fused-time
+> forward only, and generated backward is limited to hard-reset LIF-shaped
+> IRs. Anything outside that boundary falls back to the PyTorch reference path,
 > which handles arbitrary IRs. `analyze_neuron_ir(ir)` reports exactly which path
 > a given IR qualifies for.
 
