@@ -833,42 +833,22 @@ def test_benchmark_runner_supports_spec_device_overrides(tmp_path) -> None:
     assert runs[0].output_path == tmp_path / "distributed_collectives_gloo_smoke_unit.md"
 
 
-def test_benchmark_runner_includes_distributed_collective_specs() -> None:
-    assert {"distributed_collectives_gloo", "distributed_collectives_nccl"} <= {
-        spec.name for spec in PRESETS["smoke"]
-    }
-    assert {"distributed_collectives_gloo", "distributed_collectives_nccl"} <= {
-        spec.name for spec in PRESETS["core"]
-    }
-
-
-def test_benchmark_runner_includes_scalar_loss_boundary_specs() -> None:
-    assert "scalar_loss_boundary" in {spec.name for spec in PRESETS["smoke"]}
-    assert "scalar_loss_boundary" in {spec.name for spec in PRESETS["core"]}
-
-
-def test_benchmark_runner_includes_performance_frontier_specs() -> None:
-    assert "performance_frontier" in {spec.name for spec in PRESETS["smoke"]}
-    assert "performance_frontier" in {spec.name for spec in PRESETS["core"]}
-
-
-def test_benchmark_runner_includes_training_breakdown_specs() -> None:
-    assert "training_breakdown" in {spec.name for spec in PRESETS["smoke"]}
-    assert "training_breakdown" in {spec.name for spec in PRESETS["core"]}
-
-
-def test_benchmark_runner_includes_compile_triton_boundary_specs() -> None:
-    assert "compile_triton_boundary" in {spec.name for spec in PRESETS["smoke"]}
-    assert "compile_triton_boundary" in {spec.name for spec in PRESETS["core"]}
-
-
-def test_benchmark_runner_includes_compile_triton_sweep_specs() -> None:
-    assert "compile_triton_sweep" in {spec.name for spec in PRESETS["smoke"]}
-    assert "compile_triton_sweep" in {spec.name for spec in PRESETS["core"]}
-
-
-def test_benchmark_runner_includes_mnist_rate_matrix_core_spec() -> None:
-    assert "mnist_rate_matrix" in {spec.name for spec in PRESETS["core"]}
+@pytest.mark.parametrize(
+    ("spec_name", "preset_names"),
+    [
+        ("distributed_collectives_gloo", ("smoke", "core")),
+        ("distributed_collectives_nccl", ("smoke", "core")),
+        ("scalar_loss_boundary", ("smoke", "core")),
+        ("performance_frontier", ("smoke", "core")),
+        ("training_breakdown", ("smoke", "core")),
+        ("compile_triton_boundary", ("smoke", "core")),
+        ("compile_triton_sweep", ("smoke", "core")),
+        ("mnist_rate_matrix", ("core",)),
+    ],
+)
+def test_benchmark_runner_includes_specs(spec_name: str, preset_names: tuple[str, ...]) -> None:
+    for preset in preset_names:
+        assert spec_name in {spec.name for spec in PRESETS[preset]}
 
 
 def test_benchmark_runner_includes_headline_without_device_arg(tmp_path) -> None:

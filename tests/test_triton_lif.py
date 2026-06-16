@@ -177,104 +177,6 @@ def test_generated_lif_forward_source_contains_dsl_step_body() -> None:
     assert "spike = tmp4" in source
 
 
-def test_generated_lif_surrogate_backward_source_contains_codegen_step() -> None:
-    from myelin.triton import render_lif_surrogate_backward_kernel_source
-
-    source = render_lif_surrogate_backward_kernel_source("fast_sigmoid")
-
-    assert "for reverse_t in range(timesteps):" in source
-    assert "pre_reset = tl.load" in source
-    assert "grad_spike = tl.load" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_pre_reset = grad_membrane *" in source
-    assert "tl.store(grad_inputs_ptr" in source
-    assert "tl.store(grad_initial_ptr" in source
-
-
-def test_generated_lif_surrogate_backward_packed_spikes_source_contains_codegen_step() -> None:
-    from myelin.triton import render_lif_surrogate_backward_packed_spikes_kernel_source
-
-    source = render_lif_surrogate_backward_packed_spikes_kernel_source("fast_sigmoid")
-
-    assert "packed_spikes_ptr" in source
-    assert "packed_offsets = t * batch * packed_neurons" in source
-    assert "packed_word = tl.load" in source
-    assert "spike = ((packed_word >> bit_offsets) & 1).to(tl.float32)" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_pre_reset = grad_membrane *" in source
-    assert "tl.store(grad_inputs_ptr" in source
-    assert "tl.store(grad_initial_ptr" in source
-
-
-def test_generated_linear_lif_surrogate_backward_source_contains_codegen_step() -> None:
-    from myelin.triton import render_linear_lif_surrogate_backward_weight_bias_kernel_source
-
-    source = render_linear_lif_surrogate_backward_weight_bias_kernel_source("fast_sigmoid")
-
-    assert "def _generated_linear_lif_surrogate_backward_weight_bias_kernel(" in source
-    assert "for reverse_t in range(timesteps):" in source
-    assert "pre_reset = tl.load" in source
-    assert "grad_spike = tl.load" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_input = tl.dot(grad_pre_reset, tl.trans(weight_values))" in source
-    assert "weight_acc += tl.dot(input_values, grad_pre_reset)" in source
-    assert "tl.atomic_add(" in source
-
-
-def test_generated_linear_lif_surrogate_backward_packed_spikes_source_contains_codegen_step() -> (
-    None
-):
-    from myelin.triton import (
-        render_linear_lif_surrogate_backward_weight_bias_packed_spikes_kernel_source,
-    )
-
-    source = render_linear_lif_surrogate_backward_weight_bias_packed_spikes_kernel_source(
-        "fast_sigmoid"
-    )
-
-    assert "packed_spikes_ptr" in source
-    assert "packed_offsets = (" in source
-    assert "packed_word = tl.load" in source
-    assert "spike = ((packed_word >> bit_offsets[None, :]) & 1).to(tl.float32)" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_input = tl.dot(grad_pre_reset, tl.trans(weight_values))" in source
-    assert "weight_acc += tl.dot(input_values, grad_pre_reset)" in source
-
-
-def test_generated_linear_lif_surrogate_checkpoint_backward_source_contains_codegen_step() -> None:
-    from myelin.triton import render_linear_lif_surrogate_checkpoint_backward_chunk_kernel_source
-
-    source = render_linear_lif_surrogate_checkpoint_backward_chunk_kernel_source("fast_sigmoid")
-
-    assert "def _generated_linear_lif_surrogate_checkpoint_backward_chunk_kernel(" in source
-    assert "for reverse_local in range(chunk_len):" in source
-    assert "pre_reset = tl.load" in source
-    assert "grad_spike = tl.load" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_input = tl.dot(grad_pre_reset, tl.trans(weight_values))" in source
-    assert "weight_acc += tl.dot(input_values, grad_pre_reset)" in source
-    assert "tl.store(" in source
-
-
-def test_generated_checkpoint_backward_packed_spikes_source_contains_codegen_step() -> None:
-    from myelin.triton import (
-        render_linear_lif_surrogate_checkpoint_backward_chunk_packed_spikes_kernel_source,
-    )
-
-    source = render_linear_lif_surrogate_checkpoint_backward_chunk_packed_spikes_kernel_source(
-        "fast_sigmoid"
-    )
-
-    assert "packed_spikes_scratch_ptr" not in source
-    assert "packed_word = tl.load" not in source
-    assert "spike = (pre_reset >= threshold).to(tl.float32)" in source
-    assert "grad_spike_rate_ptr" in source
-    assert "grad_spike_rates_ptr" in source
-    assert "tl.abs(centered)" in source
-    assert "grad_input = tl.dot(grad_pre_reset, tl.trans(weight_values))" in source
-    assert "tl.store(" in source
-
-
 def test_generic_generated_forward_renderer_uses_ir_boundary() -> None:
     from myelin.dsl import lif_ir
     from myelin.triton import render_forward_kernel_source
@@ -2667,68 +2569,18 @@ def test_public_linear_surrogate_lif_rate_forward_none_matches_dense_rates() -> 
     assert torch.allclose(weight.grad, ref_weight.grad, atol=1e-4, rtol=1e-3)
 
 
-def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_weight_grad() -> None:
+@pytest.mark.parametrize("has_bias", [False, True])
+def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_grad(
+    has_bias: bool,
+) -> None:
     from myelin.kernels import linear_surrogate_lif_rate_forward
 
-    torch.manual_seed(140)
+    torch.manual_seed(140 + int(has_bias))
     inputs = torch.rand((6, 3, 16), device="cuda")
     weight = ((torch.rand((16, 32), device="cuda") - 0.5) * 0.02).requires_grad_()
     reference_weight = weight.detach().clone().requires_grad_()
-    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
-    target = torch.full((3, 32), 0.05, device="cuda")
-
-    expected_state, expected_rates = linear_surrogate_lif_rate_forward(
-        inputs,
-        reference_weight,
-        None,
-        params,
-        surrogate="fast_sigmoid",
-        surrogate_slope=5.0,
-        backend="triton",
-        checkpoint_size=3,
-        block_b=16,
-        block_n=16,
-        block_f=16,
-        reduction="none",
-    )
-    expected_loss = (expected_rates - target).square().mean()
-    expected_loss = expected_loss + 0.1 * expected_state.membrane.square().mean()
-    expected_loss.backward()
-
-    actual_state, actual_rates = linear_surrogate_lif_rate_forward(
-        inputs,
-        weight,
-        None,
-        params,
-        surrogate="fast_sigmoid",
-        surrogate_slope=5.0,
-        backend="triton_compile",
-        checkpoint_size=3,
-        block_b=16,
-        block_n=16,
-        block_f=16,
-        reduction="none",
-    )
-    actual_loss = (actual_rates - target).square().mean()
-    actual_loss = actual_loss + 0.1 * actual_state.membrane.square().mean()
-    actual_loss.backward()
-
-    assert torch.allclose(actual_rates, expected_rates.detach())
-    assert torch.allclose(actual_state.membrane, expected_state.membrane.detach())
-    assert weight.grad is not None
-    assert reference_weight.grad is not None
-    assert torch.allclose(weight.grad, reference_weight.grad, atol=1e-4, rtol=1e-3)
-
-
-def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_bias_grad() -> None:
-    from myelin.kernels import linear_surrogate_lif_rate_forward
-
-    torch.manual_seed(145)
-    inputs = torch.rand((6, 3, 16), device="cuda")
-    weight = ((torch.rand((16, 32), device="cuda") - 0.5) * 0.02).requires_grad_()
-    bias = ((torch.rand((32,), device="cuda") - 0.5) * 0.01).requires_grad_()
-    reference_weight = weight.detach().clone().requires_grad_()
-    reference_bias = bias.detach().clone().requires_grad_()
+    bias = ((torch.rand((32,), device="cuda") - 0.5) * 0.01).requires_grad_() if has_bias else None
+    reference_bias = None if bias is None else bias.detach().clone().requires_grad_()
     params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
     target = torch.full((3, 32), 0.05, device="cuda")
 
@@ -2771,11 +2623,12 @@ def test_public_linear_surrogate_lif_rate_triton_compile_matches_triton_bias_gra
     assert torch.allclose(actual_rates, expected_rates.detach())
     assert torch.allclose(actual_state.membrane, expected_state.membrane.detach())
     assert weight.grad is not None
-    assert bias.grad is not None
     assert reference_weight.grad is not None
-    assert reference_bias.grad is not None
     assert torch.allclose(weight.grad, reference_weight.grad, atol=1e-4, rtol=1e-3)
-    assert torch.allclose(bias.grad, reference_bias.grad, atol=1e-4, rtol=1e-3)
+    if bias is not None and reference_bias is not None:
+        assert bias.grad is not None
+        assert reference_bias.grad is not None
+        assert torch.allclose(bias.grad, reference_bias.grad, atol=1e-4, rtol=1e-3)
 
 
 def test_public_linear_surrogate_lif_rate_triton_compile_rejects_unsupported_cases() -> None:

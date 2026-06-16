@@ -42,6 +42,15 @@ from myelin.neurons import LIFParams
 pytestmark = pytest.mark.extended
 
 
+@pytest.fixture
+def unit_2x3_quantized():
+    """An 8-bit quantized export of a biasless 2x3 unit-weight dense LIF layer."""
+    return quantize_dense_lif_export(
+        export_dense_lif_layer(torch.ones((2, 3)), None, LIFParams()),
+        num_bits=8,
+    )
+
+
 def test_export_dense_lif_layer_round_trips_json(tmp_path: Path) -> None:
     weight = torch.tensor([[0.1, -0.2, 0.3], [0.4, 0.5, -0.6]])
     bias = torch.tensor([0.01, -0.02, 0.03])
@@ -164,14 +173,12 @@ def test_dequantize_dense_lif_export_approximates_float_export() -> None:
     assert dequantized.neuron == export.neuron
 
 
-def test_quantize_dense_lif_export_rejects_invalid_bit_width() -> None:
+@pytest.mark.parametrize("num_bits", [1, 17])
+def test_quantize_dense_lif_export_rejects_invalid_bit_width(num_bits: int) -> None:
     export = export_dense_lif_layer(torch.ones((2, 3)), None, LIFParams())
 
     with pytest.raises(ValueError, match="num_bits"):
-        quantize_dense_lif_export(export, num_bits=1)
-
-    with pytest.raises(ValueError, match="num_bits"):
-        quantize_dense_lif_export(export, num_bits=17)
+        quantize_dense_lif_export(export, num_bits=num_bits)
 
 
 def test_quantized_dense_lif_export_parser_rejects_out_of_range_values() -> None:
@@ -254,31 +261,26 @@ def test_plan_dense_lif_placement_omits_accumulator_when_inputs_fit_one_core() -
     assert [core.output_count for core in plan.cores] == [2, 2, 1]
 
 
-def test_plan_dense_lif_placement_rejects_invalid_limits_and_target() -> None:
-    quantized = quantize_dense_lif_export(
-        export_dense_lif_layer(torch.ones((2, 3)), None, LIFParams()),
-        num_bits=8,
-    )
-
-    with pytest.raises(ValueError, match="max_inputs_per_core"):
-        plan_dense_lif_placement(quantized, max_inputs_per_core=0, max_outputs_per_core=2)
-
-    with pytest.raises(ValueError, match="max_outputs_per_core"):
-        plan_dense_lif_placement(quantized, max_inputs_per_core=2, max_outputs_per_core=0)
-
-    with pytest.raises(ValueError, match="target"):
-        plan_dense_lif_placement(
-            quantized, max_inputs_per_core=2, max_outputs_per_core=2, target=""
-        )
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"max_inputs_per_core": 0, "max_outputs_per_core": 2}, "max_inputs_per_core"),
+        ({"max_inputs_per_core": 2, "max_outputs_per_core": 0}, "max_outputs_per_core"),
+        ({"max_inputs_per_core": 2, "max_outputs_per_core": 2, "target": ""}, "target"),
+    ],
+)
+def test_plan_dense_lif_placement_rejects_invalid_limits_and_target(
+    unit_2x3_quantized, kwargs: dict, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        plan_dense_lif_placement(unit_2x3_quantized, **kwargs)
 
 
-def test_dense_lif_placement_parser_rejects_inconsistent_core_counts() -> None:
-    quantized = quantize_dense_lif_export(
-        export_dense_lif_layer(torch.ones((2, 3)), None, LIFParams()),
-        num_bits=8,
-    )
+def test_dense_lif_placement_parser_rejects_inconsistent_core_counts(
+    unit_2x3_quantized,
+) -> None:
     data = plan_dense_lif_placement(
-        quantized,
+        unit_2x3_quantized,
         max_inputs_per_core=2,
         max_outputs_per_core=2,
     ).to_dict()
@@ -414,50 +416,37 @@ def test_export_spinnaker2_dense_lif_manifest_round_trips_json(tmp_path: Path) -
     assert parsed.metadata == {"target": "spinnaker2"}
 
 
-def test_export_spinnaker2_dense_lif_manifest_rejects_constraint_mismatch() -> None:
+@pytest.mark.parametrize(
+    ("placement_target", "neurons_per_core", "incoming_synapses_per_core", "match"),
+    [
+        ("spinnaker2", 3, 16, "neurons_per_core"),
+        ("spinnaker2", 4, 15, "incoming_synapses_per_core"),
+        ("generic", 4, 16, "target"),
+    ],
+)
+def test_export_spinnaker2_dense_lif_manifest_rejects_constraint_mismatch(
+    placement_target: str,
+    neurons_per_core: int,
+    incoming_synapses_per_core: int,
+    match: str,
+) -> None:
     dense = export_dense_lif_layer(torch.ones((4, 4)), None, LIFParams())
     quantized = quantize_dense_lif_export(dense, num_bits=8)
     placement = plan_dense_lif_placement(
         quantized,
         max_inputs_per_core=4,
         max_outputs_per_core=4,
-        target="spinnaker2",
+        target=placement_target,
     )
 
-    with pytest.raises(ValueError, match="neurons_per_core"):
+    with pytest.raises(ValueError, match=match):
         export_spinnaker2_dense_lif_manifest(
             quantized,
             placement,
             quantized_export_path="q.json",
             placement_plan_path="p.json",
-            neurons_per_core=3,
-            incoming_synapses_per_core=16,
-        )
-
-    with pytest.raises(ValueError, match="incoming_synapses_per_core"):
-        export_spinnaker2_dense_lif_manifest(
-            quantized,
-            placement,
-            quantized_export_path="q.json",
-            placement_plan_path="p.json",
-            neurons_per_core=4,
-            incoming_synapses_per_core=15,
-        )
-
-    generic_placement = plan_dense_lif_placement(
-        quantized,
-        max_inputs_per_core=4,
-        max_outputs_per_core=4,
-        target="generic",
-    )
-    with pytest.raises(ValueError, match="target"):
-        export_spinnaker2_dense_lif_manifest(
-            quantized,
-            generic_placement,
-            quantized_export_path="q.json",
-            placement_plan_path="p.json",
-            neurons_per_core=4,
-            incoming_synapses_per_core=16,
+            neurons_per_core=neurons_per_core,
+            incoming_synapses_per_core=incoming_synapses_per_core,
         )
 
 
@@ -499,39 +488,53 @@ def test_export_linear_lif_module_rejects_non_lif_module() -> None:
 
 
 def test_hardware_exports_are_public() -> None:
-    assert myelin.HARDWARE_BUNDLE_FORMAT == HARDWARE_BUNDLE_FORMAT
-    assert myelin.HARDWARE_EXPORT_FORMAT == HARDWARE_EXPORT_FORMAT
-    assert myelin.PLACEMENT_EXPORT_FORMAT == PLACEMENT_EXPORT_FORMAT
-    assert myelin.QUANTIZED_HARDWARE_EXPORT_FORMAT == QUANTIZED_HARDWARE_EXPORT_FORMAT
-    assert myelin.SPINNAKER2_DENSE_LIF_EXPORT_FORMAT == SPINNAKER2_DENSE_LIF_EXPORT_FORMAT
-    assert myelin.DenseLIFHardwareExport is not None
-    assert myelin.DenseLIFPlacementCore is not None
-    assert myelin.DenseLIFPlacementPlan is not None
-    assert myelin.HardwareExportBundle is not None
-    assert myelin.QuantizedDenseLIFHardwareExport is not None
-    assert myelin.SpiNNaker2DenseLIFManifest is not None
-    assert myelin.export_dense_lif_layer is export_dense_lif_layer
-    assert myelin.export_linear_lif_module is export_linear_lif_module
-    assert myelin.dense_lif_hardware_export_from_dict is dense_lif_hardware_export_from_dict
-    assert myelin.dense_lif_placement_plan_from_dict is dense_lif_placement_plan_from_dict
-    assert myelin.hardware_export_bundle_from_dict is hardware_export_bundle_from_dict
-    assert (
-        myelin.quantized_dense_lif_hardware_export_from_dict
-        is quantized_dense_lif_hardware_export_from_dict
-    )
-    assert myelin.export_linear_lif_hardware_bundle is export_linear_lif_hardware_bundle
-    assert myelin.export_spinnaker2_dense_lif_manifest is export_spinnaker2_dense_lif_manifest
-    assert myelin.spinnaker2_dense_lif_manifest_from_dict is spinnaker2_dense_lif_manifest_from_dict
-    assert myelin.plan_dense_lif_placement is plan_dense_lif_placement
-    assert myelin.quantize_dense_lif_export is quantize_dense_lif_export
-    assert myelin.dequantize_dense_lif_export is dequantize_dense_lif_export
-    assert myelin.read_dense_lif_placement_plan is read_dense_lif_placement_plan
-    assert myelin.read_hardware_export is read_hardware_export
-    assert myelin.read_hardware_export_bundle is read_hardware_export_bundle
-    assert myelin.read_quantized_hardware_export is read_quantized_hardware_export
-    assert myelin.read_spinnaker2_dense_lif_manifest is read_spinnaker2_dense_lif_manifest
-    assert myelin.write_dense_lif_placement_plan is write_dense_lif_placement_plan
-    assert myelin.write_hardware_export is write_hardware_export
-    assert myelin.write_hardware_export_bundle is write_hardware_export_bundle
-    assert myelin.write_quantized_hardware_export is write_quantized_hardware_export
-    assert myelin.write_spinnaker2_dense_lif_manifest is write_spinnaker2_dense_lif_manifest
+    # Format constants are re-exported by value.
+    format_constants = [
+        "HARDWARE_BUNDLE_FORMAT",
+        "HARDWARE_EXPORT_FORMAT",
+        "PLACEMENT_EXPORT_FORMAT",
+        "QUANTIZED_HARDWARE_EXPORT_FORMAT",
+        "SPINNAKER2_DENSE_LIF_EXPORT_FORMAT",
+    ]
+    for name in format_constants:
+        assert getattr(myelin, name) == globals()[name]
+
+    # Dataclasses are re-exported as public names.
+    dataclass_names = [
+        "DenseLIFHardwareExport",
+        "DenseLIFPlacementCore",
+        "DenseLIFPlacementPlan",
+        "HardwareExportBundle",
+        "QuantizedDenseLIFHardwareExport",
+        "SpiNNaker2DenseLIFManifest",
+    ]
+    for name in dataclass_names:
+        assert getattr(myelin, name) is not None
+
+    # Functions are re-exported as the same object.
+    function_names = [
+        "export_dense_lif_layer",
+        "export_linear_lif_module",
+        "dense_lif_hardware_export_from_dict",
+        "dense_lif_placement_plan_from_dict",
+        "hardware_export_bundle_from_dict",
+        "quantized_dense_lif_hardware_export_from_dict",
+        "export_linear_lif_hardware_bundle",
+        "export_spinnaker2_dense_lif_manifest",
+        "spinnaker2_dense_lif_manifest_from_dict",
+        "plan_dense_lif_placement",
+        "quantize_dense_lif_export",
+        "dequantize_dense_lif_export",
+        "read_dense_lif_placement_plan",
+        "read_hardware_export",
+        "read_hardware_export_bundle",
+        "read_quantized_hardware_export",
+        "read_spinnaker2_dense_lif_manifest",
+        "write_dense_lif_placement_plan",
+        "write_hardware_export",
+        "write_hardware_export_bundle",
+        "write_quantized_hardware_export",
+        "write_spinnaker2_dense_lif_manifest",
+    ]
+    for name in function_names:
+        assert getattr(myelin, name) is globals()[name]

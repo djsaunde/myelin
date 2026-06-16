@@ -65,13 +65,19 @@ def test_online_lif_eligibility_grad_returns_hard_spikes_and_final_state() -> No
     assert result.grad_bias.shape == bias.shape
 
 
-def test_online_lif_eligibility_grad_supports_biasless_weights() -> None:
+@pytest.mark.parametrize(
+    ("grad_fn", "params"),
+    [
+        (linear_lif_online_eligibility_grad, LIFParams()),
+        (linear_alif_online_eligibility_grad, ALIFParams()),
+    ],
+)
+def test_online_eligibility_grad_supports_biasless_weights(grad_fn, params) -> None:
     inputs = torch.rand((3, 2, 4))
     weight = torch.rand((4, 5))
     learning_signal = torch.rand((3, 2, 5))
-    params = LIFParams()
 
-    result = linear_lif_online_eligibility_grad(inputs, weight, None, learning_signal, params)
+    result = grad_fn(inputs, weight, None, learning_signal, params)
 
     assert result.grad_bias is None
     assert result.grad_weight.shape == weight.shape
@@ -272,18 +278,6 @@ def test_online_alif_eligibility_grad_matches_dense_adaptation_trace_reference()
     assert torch.allclose(actual.grad_bias, expected.grad_bias)
 
 
-def test_online_alif_eligibility_grad_supports_biasless_weights() -> None:
-    inputs = torch.rand((3, 2, 4))
-    weight = torch.rand((4, 5))
-    learning_signal = torch.rand((3, 2, 5))
-    params = ALIFParams()
-
-    result = linear_alif_online_eligibility_grad(inputs, weight, None, learning_signal, params)
-
-    assert result.grad_bias is None
-    assert result.grad_weight.shape == weight.shape
-
-
 def test_online_alif_eligibility_grad_accepts_custom_surrogate_ir() -> None:
     torch.manual_seed(8)
     inputs = torch.rand((4, 2, 3))
@@ -320,14 +314,36 @@ def test_online_alif_eligibility_grad_accepts_custom_surrogate_ir() -> None:
     assert actual.grad_bias is None
 
 
-def test_linear_online_alif_module_matches_functional_helper() -> None:
-    from myelin.modules import LinearOnlineALIF
+@pytest.mark.parametrize(
+    ("module_name", "grad_fn", "params", "seed", "adaptive"),
+    [
+        (
+            "LinearOnlineALIF",
+            linear_alif_online_eligibility_grad,
+            ALIFParams(tau_mem=8.0, tau_adaptation=5.0, threshold=0.7, reset=-0.25, beta=0.25),
+            4,
+            True,
+        ),
+        (
+            "LinearOnlineLIF",
+            linear_lif_online_eligibility_grad,
+            LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.25),
+            1,
+            False,
+        ),
+    ],
+)
+def test_linear_online_module_matches_functional_helper(
+    module_name, grad_fn, params, seed, adaptive
+) -> None:
+    import myelin.modules
 
-    torch.manual_seed(4)
+    module_cls = getattr(myelin.modules, module_name)
+
+    torch.manual_seed(seed)
     inputs = torch.rand((5, 3, 4))
     learning_signal = torch.rand((5, 3, 6)) - 0.5
-    params = ALIFParams(tau_mem=8.0, tau_adaptation=5.0, threshold=0.7, reset=-0.25, beta=0.25)
-    module = LinearOnlineALIF(
+    module = module_cls(
         4,
         6,
         params,
@@ -336,7 +352,7 @@ def test_linear_online_alif_module_matches_functional_helper() -> None:
     )
 
     actual = module(inputs, learning_signal)
-    expected = linear_alif_online_eligibility_grad(
+    expected = grad_fn(
         inputs,
         module.synapse.weight,
         module.synapse.bias,
@@ -348,20 +364,27 @@ def test_linear_online_alif_module_matches_functional_helper() -> None:
 
     assert torch.equal(actual.spikes, expected.spikes)
     assert torch.allclose(actual.final_state.membrane, expected.final_state.membrane)
-    assert torch.allclose(actual.final_state.adaptation, expected.final_state.adaptation)
+    if adaptive:
+        assert torch.allclose(actual.final_state.adaptation, expected.final_state.adaptation)
     assert torch.allclose(actual.grad_weight, expected.grad_weight)
     assert actual.grad_bias is not None
     assert expected.grad_bias is not None
     assert torch.allclose(actual.grad_bias, expected.grad_bias)
 
 
-def test_linear_online_alif_step_online_updates_parameters() -> None:
-    from myelin.modules import LinearOnlineALIF
+@pytest.mark.parametrize(
+    ("module_name", "seed"),
+    [("LinearOnlineALIF", 5), ("LinearOnlineLIF", 2)],
+)
+def test_linear_online_step_online_updates_parameters(module_name, seed) -> None:
+    import myelin.modules
 
-    torch.manual_seed(5)
+    module_cls = getattr(myelin.modules, module_name)
+
+    torch.manual_seed(seed)
     inputs = torch.rand((4, 2, 3))
     learning_signal = torch.rand((4, 2, 5)) - 0.5
-    module = LinearOnlineALIF(3, 5)
+    module = module_cls(3, 5)
     weight_before = module.synapse.weight.detach().clone()
     assert module.synapse.bias is not None
     bias_before = module.synapse.bias.detach().clone()
@@ -376,99 +399,64 @@ def test_linear_online_alif_step_online_updates_parameters() -> None:
         module.step_online(inputs, learning_signal, lr=-0.1)
 
 
-def test_linear_online_lif_module_matches_functional_helper() -> None:
-    from myelin.modules import LinearOnlineLIF
-
-    torch.manual_seed(1)
-    inputs = torch.rand((5, 3, 4))
-    learning_signal = torch.rand((5, 3, 6)) - 0.5
-    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.25)
-    module = LinearOnlineLIF(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-    )
-
-    actual = module(inputs, learning_signal)
-    expected = linear_lif_online_eligibility_grad(
-        inputs,
-        module.synapse.weight,
-        module.synapse.bias,
-        learning_signal,
-        params,
-        surrogate="fast_sigmoid",
-        surrogate_slope=5.0,
-    )
-
-    assert torch.equal(actual.spikes, expected.spikes)
-    assert torch.allclose(actual.final_state.membrane, expected.final_state.membrane)
-    assert torch.allclose(actual.grad_weight, expected.grad_weight)
-    assert actual.grad_bias is not None
-    assert expected.grad_bias is not None
-    assert torch.allclose(actual.grad_bias, expected.grad_bias)
-
-
-def test_linear_online_lif_module_accepts_custom_surrogate_ir() -> None:
-    from myelin.modules import LinearOnlineLIF
-
-    torch.manual_seed(9)
-    inputs = torch.rand((5, 3, 4))
-    learning_signal = torch.rand((5, 3, 6)) - 0.5
-    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.25)
+def _wide_fast_surrogate():
     builder = SurrogateBuilder("wide_fast")
     centered = builder.centered()
     width = builder.param("width")
-    custom_surrogate = builder.build(0.5 / (1.0 + (centered / width).abs()).square())
-    module = LinearOnlineLIF(
-        4,
-        6,
-        params,
-        surrogate=custom_surrogate,
-        surrogate_slope=5.0,
-        surrogate_params={"width": 1.0},
-    )
-
-    actual = module(inputs, learning_signal)
-    expected = linear_lif_online_eligibility_grad(
-        inputs,
-        module.synapse.weight,
-        module.synapse.bias,
-        learning_signal,
-        params,
-        surrogate=custom_surrogate,
-        surrogate_slope=5.0,
-        surrogate_params={"width": 1.0},
-    )
-
-    assert torch.equal(actual.spikes, expected.spikes)
-    assert torch.allclose(actual.grad_weight, expected.grad_weight)
-    assert actual.grad_bias is not None
-    assert expected.grad_bias is not None
-    assert torch.allclose(actual.grad_bias, expected.grad_bias)
+    return builder.build(0.5 / (1.0 + (centered / width).abs()).square())
 
 
-def test_linear_online_alif_module_accepts_custom_surrogate_ir() -> None:
-    from myelin.modules import LinearOnlineALIF
-
-    torch.manual_seed(10)
-    inputs = torch.rand((5, 3, 4))
-    learning_signal = torch.rand((5, 3, 6)) - 0.5
-    params = ALIFParams(tau_mem=8.0, tau_adaptation=5.0, threshold=0.7, reset=-0.25, beta=0.25)
+def _fast_alias_surrogate():
     builder = SurrogateBuilder("fast_alias")
     centered = builder.centered()
-    custom_surrogate = builder.build(0.5 / (1.0 + centered.abs()).square())
-    module = LinearOnlineALIF(
+    return builder.build(0.5 / (1.0 + centered.abs()).square())
+
+
+@pytest.mark.parametrize(
+    ("module_name", "grad_fn", "params", "seed", "make_surrogate", "surrogate_params", "adaptive"),
+    [
+        (
+            "LinearOnlineLIF",
+            linear_lif_online_eligibility_grad,
+            LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.25),
+            9,
+            _wide_fast_surrogate,
+            {"width": 1.0},
+            False,
+        ),
+        (
+            "LinearOnlineALIF",
+            linear_alif_online_eligibility_grad,
+            ALIFParams(tau_mem=8.0, tau_adaptation=5.0, threshold=0.7, reset=-0.25, beta=0.25),
+            10,
+            _fast_alias_surrogate,
+            {},
+            True,
+        ),
+    ],
+)
+def test_linear_online_module_accepts_custom_surrogate_ir(
+    module_name, grad_fn, params, seed, make_surrogate, surrogate_params, adaptive
+) -> None:
+    import myelin.modules
+
+    module_cls = getattr(myelin.modules, module_name)
+
+    torch.manual_seed(seed)
+    inputs = torch.rand((5, 3, 4))
+    learning_signal = torch.rand((5, 3, 6)) - 0.5
+    custom_surrogate = make_surrogate()
+    module = module_cls(
         4,
         6,
         params,
         surrogate=custom_surrogate,
         surrogate_slope=5.0,
+        surrogate_params=surrogate_params,
     )
 
     actual = module(inputs, learning_signal)
-    expected = linear_alif_online_eligibility_grad(
+    expected = grad_fn(
         inputs,
         module.synapse.weight,
         module.synapse.bias,
@@ -476,33 +464,16 @@ def test_linear_online_alif_module_accepts_custom_surrogate_ir() -> None:
         params,
         surrogate=custom_surrogate,
         surrogate_slope=5.0,
+        surrogate_params=surrogate_params,
     )
 
     assert torch.equal(actual.spikes, expected.spikes)
-    assert torch.allclose(actual.final_state.adaptation, expected.final_state.adaptation)
+    if adaptive:
+        assert torch.allclose(actual.final_state.adaptation, expected.final_state.adaptation)
     assert torch.allclose(actual.grad_weight, expected.grad_weight)
     assert actual.grad_bias is not None
     assert expected.grad_bias is not None
     assert torch.allclose(actual.grad_bias, expected.grad_bias)
-
-
-def test_linear_online_lif_step_online_updates_parameters() -> None:
-    from myelin.modules import LinearOnlineLIF
-
-    torch.manual_seed(2)
-    inputs = torch.rand((4, 2, 3))
-    learning_signal = torch.rand((4, 2, 5)) - 0.5
-    module = LinearOnlineLIF(3, 5)
-    weight_before = module.synapse.weight.detach().clone()
-    assert module.synapse.bias is not None
-    bias_before = module.synapse.bias.detach().clone()
-
-    result = module.step_online(inputs, learning_signal, lr=0.1)
-
-    assert torch.allclose(module.synapse.weight, weight_before - 0.1 * result.grad_weight)
-    assert result.grad_bias is not None
-    assert module.synapse.bias is not None
-    assert torch.allclose(module.synapse.bias, bias_before - 0.1 * result.grad_bias)
 
 
 def test_linear_online_lif_supports_biasless_layers_and_rejects_negative_lr() -> None:

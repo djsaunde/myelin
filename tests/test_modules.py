@@ -518,13 +518,10 @@ def test_linear_custom_surrogate_neuron_matches_linear_surrogate_lif() -> None:
     assert torch.allclose(custom.synapse.bias.grad, reference.synapse.bias.grad)
 
 
-def test_linear_custom_surrogate_neuron_stream_synapse_matches_materialized() -> None:
-    torch.manual_seed(20)
-    inputs = torch.rand((6, 3, 4), requires_grad=True)
-    streamed_inputs = inputs.detach().clone().requires_grad_()
+def _build_custom_materialized() -> LinearCustomSurrogateNeuron:
     params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
     custom_params = {"decay": params.decay, "threshold": params.threshold, "reset": params.reset}
-    materialized = LinearCustomSurrogateNeuron(
+    return LinearCustomSurrogateNeuron(
         4,
         6,
         build_test_lif_ir(),
@@ -533,7 +530,12 @@ def test_linear_custom_surrogate_neuron_stream_synapse_matches_materialized() ->
         surrogate_slope=5.0,
         stream_synapse=False,
     )
-    streamed = LinearCustomSurrogateNeuron(
+
+
+def _build_custom_streamed() -> LinearCustomSurrogateNeuron:
+    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
+    custom_params = {"decay": params.decay, "threshold": params.threshold, "reset": params.reset}
+    return LinearCustomSurrogateNeuron(
         4,
         6,
         build_test_lif_ir(),
@@ -543,28 +545,87 @@ def test_linear_custom_surrogate_neuron_stream_synapse_matches_materialized() ->
         stream_synapse=True,
         checkpoint_size=3,
     )
-    streamed.synapse.weight.data.copy_(materialized.synapse.weight)
-    assert materialized.synapse.bias is not None
-    assert streamed.synapse.bias is not None
-    streamed.synapse.bias.data.copy_(materialized.synapse.bias)
 
-    materialized_spikes = materialized(inputs)
-    materialized_loss = materialized_spikes.mean() + 0.1 * materialized_spikes.square().mean()
-    materialized_loss.backward()
-    streamed_spikes = streamed(streamed_inputs)
-    streamed_loss = streamed_spikes.mean() + 0.1 * streamed_spikes.square().mean()
-    streamed_loss.backward()
 
-    assert torch.equal(streamed_spikes.detach(), materialized_spikes.detach())
+def _build_lif_materialized() -> LinearSurrogateLIF:
+    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
+    return LinearSurrogateLIF(
+        4,
+        6,
+        params,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        stream_synapse=False,
+    )
+
+
+def _build_lif_streamed() -> LinearSurrogateLIF:
+    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
+    return LinearSurrogateLIF(
+        4,
+        6,
+        params,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        stream_synapse=True,
+    )
+
+
+def _build_lif_checkpointed() -> LinearSurrogateLIF:
+    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
+    return LinearSurrogateLIF(
+        4,
+        6,
+        params,
+        surrogate=fast_sigmoid_surrogate,
+        surrogate_slope=5.0,
+        stream_synapse=True,
+        checkpoint_size=3,
+    )
+
+
+@pytest.mark.parametrize(
+    ("seed", "time_steps", "build_reference", "build_variant"),
+    [
+        (20, 6, _build_custom_materialized, _build_custom_streamed),
+        (10, 5, _build_lif_materialized, _build_lif_streamed),
+        (11, 7, _build_lif_streamed, _build_lif_checkpointed),
+    ],
+)
+def test_streamed_synapse_variant_matches_reference(
+    seed: int,
+    time_steps: int,
+    build_reference,
+    build_variant,
+) -> None:
+    torch.manual_seed(seed)
+    inputs = torch.rand((time_steps, 3, 4), requires_grad=True)
+    variant_inputs = inputs.detach().clone().requires_grad_()
+    reference = build_reference()
+    variant = build_variant()
+    variant.synapse.weight.data.copy_(reference.synapse.weight)
+    assert reference.synapse.bias is not None
+    assert variant.synapse.bias is not None
+    variant.synapse.bias.data.copy_(reference.synapse.bias)
+
+    def loss(spikes: torch.Tensor) -> torch.Tensor:
+        return spikes.mean() + 0.1 * spikes.square().mean()
+
+    reference_spikes = reference(inputs)
+    loss(reference_spikes).backward()
+    variant_spikes = variant(variant_inputs)
+    loss(variant_spikes).backward()
+
+    assert torch.equal(variant_spikes.detach(), reference_spikes.detach())
     assert inputs.grad is not None
-    assert streamed_inputs.grad is not None
-    assert materialized.synapse.weight.grad is not None
-    assert streamed.synapse.weight.grad is not None
-    assert materialized.synapse.bias.grad is not None
-    assert streamed.synapse.bias.grad is not None
-    assert torch.allclose(streamed_inputs.grad, inputs.grad)
-    assert torch.allclose(streamed.synapse.weight.grad, materialized.synapse.weight.grad)
-    assert torch.allclose(streamed.synapse.bias.grad, materialized.synapse.bias.grad)
+    assert variant_inputs.grad is not None
+    assert reference.synapse.weight.grad is not None
+    assert variant.synapse.weight.grad is not None
+    assert reference.synapse.bias.grad is not None
+    assert variant.synapse.bias.grad is not None
+    assert torch.allclose(variant_inputs.grad, inputs.grad)
+    assert torch.allclose(variant.synapse.weight.grad, reference.synapse.weight.grad)
+    assert torch.allclose(variant.synapse.bias.grad, reference.synapse.bias.grad)
 
 
 def test_linear_custom_surrogate_neuron_rate_matches_lif_rate() -> None:
@@ -683,51 +744,6 @@ def test_two_layer_surrogate_lif_rate_recompute_matches_composed_rate_model() ->
     assert torch.allclose(recompute_output_bias.grad, output.synapse.bias.grad)
 
 
-def test_linear_surrogate_lif_stream_synapse_matches_materialized_path() -> None:
-    torch.manual_seed(10)
-    inputs = torch.rand((5, 3, 4), requires_grad=True)
-    materialized_inputs = inputs.detach().clone().requires_grad_()
-    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
-    materialized = LinearSurrogateLIF(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-        stream_synapse=False,
-    )
-    streamed = LinearSurrogateLIF(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-        stream_synapse=True,
-    )
-    streamed.synapse.weight.data.copy_(materialized.synapse.weight)
-    assert materialized.synapse.bias is not None
-    assert streamed.synapse.bias is not None
-    streamed.synapse.bias.data.copy_(materialized.synapse.bias)
-
-    materialized_spikes = materialized(materialized_inputs)
-    materialized_loss = materialized_spikes.square().mean()
-    materialized_loss.backward()
-    streamed_spikes = streamed(inputs)
-    streamed_loss = streamed_spikes.square().mean()
-    streamed_loss.backward()
-
-    assert torch.allclose(streamed_spikes, materialized_spikes.detach())
-    assert inputs.grad is not None
-    assert materialized_inputs.grad is not None
-    assert materialized.synapse.weight.grad is not None
-    assert streamed.synapse.weight.grad is not None
-    assert materialized.synapse.bias.grad is not None
-    assert streamed.synapse.bias.grad is not None
-    assert torch.allclose(inputs.grad, materialized_inputs.grad)
-    assert torch.allclose(streamed.synapse.weight.grad, materialized.synapse.weight.grad)
-    assert torch.allclose(streamed.synapse.bias.grad, materialized.synapse.bias.grad)
-
-
 def test_linear_surrogate_lif_stream_synapse_uses_per_timestep_matmuls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -832,52 +848,6 @@ def test_linear_surrogate_lif_packed_forward_torch_matches_dense_dispatcher() ->
     assert packed_spikes.original_shape == tuple(expected_spikes.shape)
     assert torch.equal(unpack_spikes(packed_spikes, dtype=inputs.dtype), expected_spikes)
     assert torch.allclose(actual_state.membrane, expected_state.membrane)
-
-
-def test_linear_surrogate_lif_checkpoint_synapse_matches_streamed_path() -> None:
-    torch.manual_seed(11)
-    inputs = torch.rand((7, 3, 4), requires_grad=True)
-    checkpointed_inputs = inputs.detach().clone().requires_grad_()
-    params = LIFParams(tau_mem=8.0, threshold=0.7, reset=-0.2)
-    streamed = LinearSurrogateLIF(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-        stream_synapse=True,
-    )
-    checkpointed = LinearSurrogateLIF(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-        stream_synapse=True,
-        checkpoint_size=3,
-    )
-    checkpointed.synapse.weight.data.copy_(streamed.synapse.weight)
-    assert streamed.synapse.bias is not None
-    assert checkpointed.synapse.bias is not None
-    checkpointed.synapse.bias.data.copy_(streamed.synapse.bias)
-
-    streamed_spikes = streamed(inputs)
-    streamed_loss = streamed_spikes.mean() + 0.1 * streamed_spikes.square().mean()
-    streamed_loss.backward()
-    checkpointed_spikes = checkpointed(checkpointed_inputs)
-    checkpointed_loss = checkpointed_spikes.mean() + 0.1 * checkpointed_spikes.square().mean()
-    checkpointed_loss.backward()
-
-    assert torch.equal(checkpointed_spikes.detach(), streamed_spikes.detach())
-    assert inputs.grad is not None
-    assert checkpointed_inputs.grad is not None
-    assert streamed.synapse.weight.grad is not None
-    assert checkpointed.synapse.weight.grad is not None
-    assert streamed.synapse.bias.grad is not None
-    assert checkpointed.synapse.bias.grad is not None
-    assert torch.allclose(checkpointed_inputs.grad, inputs.grad)
-    assert torch.allclose(checkpointed.synapse.weight.grad, streamed.synapse.weight.grad)
-    assert torch.allclose(checkpointed.synapse.bias.grad, streamed.synapse.bias.grad)
 
 
 def test_linear_surrogate_lif_stream_synapse_rejects_smooth_forward() -> None:
@@ -1052,6 +1022,18 @@ def test_rate_readout_classifier_returns_class_logits() -> None:
     assert logits.shape == (3, 2)
 
 
+def assert_training_reduces_loss(model, inputs, loss_fn, optimizer, steps) -> None:
+    initial_loss = loss_fn(model(inputs)).detach()
+    for _ in range(steps):
+        optimizer.zero_grad()
+        loss = loss_fn(model(inputs))
+        loss.backward()
+        optimizer.step()
+    final_loss = loss_fn(model(inputs)).detach()
+
+    assert final_loss < initial_loss
+
+
 def test_rate_readout_classifier_training_reduces_tiny_loss() -> None:
     torch.manual_seed(24)
     inputs = torch.rand((8, 4, 3))
@@ -1065,18 +1047,16 @@ def test_rate_readout_classifier_training_reduces_tiny_loss() -> None:
         backend="torch",
         checkpoint_size=4,
     )
-    loss_fn = torch.nn.CrossEntropyLoss()
+    cross_entropy = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 
-    initial_loss = loss_fn(model(inputs), targets).detach()
-    for _ in range(20):
-        optimizer.zero_grad()
-        loss = loss_fn(model(inputs), targets)
-        loss.backward()
-        optimizer.step()
-    final_loss = loss_fn(model(inputs), targets).detach()
-
-    assert final_loss < initial_loss
+    assert_training_reduces_loss(
+        model,
+        inputs,
+        lambda logits: cross_entropy(logits, targets),
+        optimizer,
+        steps=20,
+    )
 
 
 def test_linear_surrogate_lif_training_step_updates_weight() -> None:
@@ -1102,67 +1082,19 @@ def test_linear_surrogate_lif_training_reduces_spike_rate_loss() -> None:
     loss_fn = SpikeRateLoss(target_rate=0.2)
     optimizer = torch.optim.SGD(layer.parameters(), lr=1.0)
 
-    initial_loss = loss_fn(layer(inputs)).detach()
-    for _ in range(25):
-        optimizer.zero_grad()
-        loss = loss_fn(layer(inputs))
-        loss.backward()
-        optimizer.step()
-    final_loss = loss_fn(layer(inputs)).detach()
-
-    assert final_loss < initial_loss
+    assert_training_reduces_loss(layer, inputs, loss_fn, optimizer, steps=25)
 
 
-@pytest.mark.extended
-def test_linear_surrogate_lif_compiles() -> None:
-    if not compiled_available():
-        pytest.skip("torch.compile is not available in this PyTorch build")
-
-    layer = LinearSurrogateLIF(3, 5)
-    inputs = torch.rand((4, 2, 3))
-
-    try:
-        compiled_layer = torch.compile(layer, mode="reduce-overhead", fullgraph=True)
-        spikes = compiled_layer(inputs)
-    except Exception as exc:
-        pytest.skip(
-            f"torch.compile could not compile SurrogateDenseLIF: {type(exc).__name__}: {exc}"
-        )
-
-    assert spikes.shape == (4, 2, 5)
+def _compile_smoke_linear_surrogate_lif() -> tuple[torch.nn.Module, torch.Tensor, tuple[int, ...]]:
+    return LinearSurrogateLIF(3, 5), torch.rand((4, 2, 3)), (4, 2, 5)
 
 
-@pytest.mark.extended
-def test_time_unroll_auto_backend_compiles() -> None:
-    if not compiled_available():
-        pytest.skip("torch.compile is not available in this PyTorch build")
-
+def _compile_smoke_time_unroll_auto() -> tuple[torch.nn.Module, torch.Tensor, tuple[int, ...]]:
     params = LIFParams(tau_mem=12.0, threshold=0.8, reset=-0.1)
-    unroll = TimeUnroll(LIFCell(params), backend="auto")
-    inputs = torch.rand((4, 2, 3))
-
-    try:
-        compiled_unroll = torch.compile(unroll, mode="reduce-overhead", fullgraph=True)
-        state, spikes = compiled_unroll(inputs)
-    except Exception as exc:
-        pytest.skip(
-            f"torch.compile could not compile TimeUnroll auto backend: {type(exc).__name__}: {exc}"
-        )
-
-    expected_state, expected_spikes = lif_unroll(
-        inputs,
-        LIFState(membrane=torch.zeros((2, 3))),
-        params,
-    )
-    assert torch.allclose(state.membrane, expected_state.membrane)
-    assert torch.equal(spikes, expected_spikes)
+    return TimeUnroll(LIFCell(params), backend="auto"), torch.rand((4, 2, 3)), (4, 2, 3)
 
 
-@pytest.mark.extended
-def test_linear_surrogate_lif_stream_auto_backend_compiles() -> None:
-    if not compiled_available():
-        pytest.skip("torch.compile is not available in this PyTorch build")
-
+def _compile_smoke_stream_auto() -> tuple[torch.nn.Module, torch.Tensor, tuple[int, ...]]:
     layer = LinearSurrogateLIF(
         3,
         5,
@@ -1171,28 +1103,12 @@ def test_linear_surrogate_lif_stream_auto_backend_compiles() -> None:
         stream_synapse=True,
         checkpoint_size=2,
     )
-    inputs = torch.rand((4, 2, 3))
-
-    try:
-        compiled_layer = torch.compile(layer, mode="reduce-overhead", fullgraph=True)
-        spikes = compiled_layer(inputs)
-    except Exception as exc:
-        pytest.skip(
-            f"torch.compile could not compile LinearSurrogateLIF stream auto backend: "
-            f"{type(exc).__name__}: {exc}"
-        )
-
-    assert spikes.shape == (4, 2, 5)
+    return layer, torch.rand((4, 2, 3)), (4, 2, 5)
 
 
-@pytest.mark.extended
-def test_linear_surrogate_lif_rate_auto_backend_compiles() -> None:
-    if not compiled_available():
-        pytest.skip("torch.compile is not available in this PyTorch build")
-
-    torch.manual_seed(21)
+def _compile_smoke_rate_auto() -> tuple[torch.nn.Module, torch.Tensor, tuple[int, ...]]:
     params = LIFParams(tau_mem=8.0, threshold=0.4, reset=-0.2)
-    eager_layer = LinearSurrogateLIFRate(
+    layer = LinearSurrogateLIFRate(
         4,
         6,
         params,
@@ -1202,56 +1118,10 @@ def test_linear_surrogate_lif_rate_auto_backend_compiles() -> None:
         checkpoint_size=3,
         reduction="none",
     )
-    compiled_layer = LinearSurrogateLIFRate(
-        4,
-        6,
-        params,
-        surrogate=fast_sigmoid_surrogate,
-        surrogate_slope=5.0,
-        backend="auto",
-        checkpoint_size=3,
-        reduction="none",
-    )
-    compiled_layer.synapse.weight.data.copy_(eager_layer.synapse.weight)
-    assert eager_layer.synapse.bias is not None
-    assert compiled_layer.synapse.bias is not None
-    compiled_layer.synapse.bias.data.copy_(eager_layer.synapse.bias)
-
-    inputs = (torch.rand((5, 3, 4)) * 1.5).requires_grad_()
-    compiled_inputs = inputs.detach().clone().requires_grad_()
-
-    eager_rates = eager_layer(inputs)
-    eager_loss = eager_rates.square().mean()
-    eager_loss.backward()
-
-    try:
-        compiled = torch.compile(compiled_layer, mode="reduce-overhead", fullgraph=True)
-        compiled_rates = compiled(compiled_inputs)
-        compiled_loss = compiled_rates.square().mean()
-        compiled_loss.backward()
-    except Exception as exc:
-        pytest.skip(
-            f"torch.compile could not compile LinearSurrogateLIFRate auto backend: "
-            f"{type(exc).__name__}: {exc}"
-        )
-
-    assert torch.equal(compiled_rates.detach(), eager_rates.detach())
-    assert inputs.grad is not None
-    assert compiled_inputs.grad is not None
-    assert eager_layer.synapse.weight.grad is not None
-    assert compiled_layer.synapse.weight.grad is not None
-    assert eager_layer.synapse.bias.grad is not None
-    assert compiled_layer.synapse.bias.grad is not None
-    assert torch.allclose(compiled_inputs.grad, inputs.grad)
-    assert torch.allclose(compiled_layer.synapse.weight.grad, eager_layer.synapse.weight.grad)
-    assert torch.allclose(compiled_layer.synapse.bias.grad, eager_layer.synapse.bias.grad)
+    return layer, torch.rand((5, 3, 4)), (3, 6)
 
 
-@pytest.mark.extended
-def test_rate_readout_classifier_compiles() -> None:
-    if not compiled_available():
-        pytest.skip("torch.compile is not available in this PyTorch build")
-
+def _compile_smoke_rate_readout() -> tuple[torch.nn.Module, torch.Tensor, tuple[int, ...]]:
     model = RateReadoutClassifier(
         4,
         6,
@@ -1261,14 +1131,33 @@ def test_rate_readout_classifier_compiles() -> None:
         backend="torch",
         checkpoint_size=3,
     )
-    inputs = torch.rand((5, 3, 4))
+    return model, torch.rand((5, 3, 4)), (3, 2)
+
+
+@pytest.mark.extended
+@pytest.mark.parametrize(
+    "build",
+    [
+        _compile_smoke_linear_surrogate_lif,
+        _compile_smoke_time_unroll_auto,
+        _compile_smoke_stream_auto,
+        _compile_smoke_rate_auto,
+        _compile_smoke_rate_readout,
+    ],
+)
+def test_module_variant_compiles(build) -> None:
+    if not compiled_available():
+        pytest.skip("torch.compile is not available in this PyTorch build")
+
+    module, inputs, expected_shape = build()
 
     try:
-        compiled_model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
-        logits = compiled_model(inputs)
+        compiled = torch.compile(module, mode="reduce-overhead", fullgraph=True)
+        output = compiled(inputs)
     except Exception as exc:
         pytest.skip(
-            f"torch.compile could not compile RateReadoutClassifier: {type(exc).__name__}: {exc}"
+            f"torch.compile could not compile {build.__name__}: {type(exc).__name__}: {exc}"
         )
 
-    assert logits.shape == (3, 2)
+    spikes = output[1] if isinstance(output, tuple) else output
+    assert spikes.shape == expected_shape

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from myelin.dsl import (
@@ -26,6 +27,12 @@ from myelin.dsl import (
     validate_surrogate_derivative_ir,
     where,
 )
+from myelin.dsl import (
+    param as _Param,
+)
+from myelin.dsl import (
+    state as _State,
+)
 from myelin.functional import lif_unroll
 from myelin.neurons import (
     ALIFParams,
@@ -41,36 +48,99 @@ from myelin.neurons import (
 from myelin.surrogates import SURROGATE_NAMES, surrogate_derivative
 
 
-def test_lif_ir_has_expected_boundary() -> None:
-    ir = lif_ir()
-
-    assert ir.name == "lif"
-    assert ir.state == ("membrane",)
-    assert ir.inputs == ("input_current",)
-    assert ir.params == ("decay", "threshold", "reset")
-    assert set(ir.next_state) == {"membrane"}
+@pytest.mark.parametrize(
+    "ir, name, state, inputs, params",
+    [
+        (
+            lif_ir(),
+            "lif",
+            ("membrane",),
+            ("input_current",),
+            ("decay", "threshold", "reset"),
+        ),
+        (
+            alif_ir(),
+            "alif",
+            ("membrane", "adaptation"),
+            ("input_current",),
+            ("decay", "adaptation_decay", "threshold", "reset", "beta"),
+        ),
+        (
+            izhikevich_ir(),
+            "izhikevich",
+            ("voltage", "recovery"),
+            ("input_current",),
+            (
+                "recovery_decay",
+                "recovery_coupling",
+                "reset_voltage",
+                "recovery_jump",
+                "threshold",
+                "dt",
+                "voltage_square_coeff",
+                "voltage_coeff",
+                "voltage_bias",
+            ),
+        ),
+    ],
+)
+def test_neuron_ir_has_expected_boundary(ir, name, state, inputs, params) -> None:
+    assert ir.name == name
+    assert ir.state == state
+    assert ir.inputs == inputs
+    assert ir.params == params
+    assert set(ir.next_state) == set(state)
     assert set(ir.outputs) == {"spike"}
 
 
-def test_lif_ir_evaluator_matches_reference_step() -> None:
-    state = LIFState(membrane=torch.tensor([[0.5, 0.0]]))
-    input_current = torch.tensor([[0.6, 0.2]])
-    params = LIFParams(tau_mem=10.0, threshold=1.0, reset=-0.25)
-    ir = lif_ir()
+@pytest.mark.parametrize(
+    "ir, reference_step, state, input_current, params",
+    [
+        (
+            lif_ir(),
+            lif_step,
+            LIFState(membrane=torch.tensor([[0.5, 0.0]])),
+            torch.tensor([[0.6, 0.2]]),
+            LIFParams(tau_mem=10.0, threshold=1.0, reset=-0.25),
+        ),
+        (
+            alif_ir(),
+            alif_step,
+            ALIFState(
+                membrane=torch.tensor([[0.5, 0.0]]),
+                adaptation=torch.tensor([[0.1, 0.0]]),
+            ),
+            torch.tensor([[0.7, 1.1]]),
+            ALIFParams(tau_mem=10.0, tau_adaptation=5.0, threshold=1.0, reset=0.0, beta=0.5),
+        ),
+        (
+            izhikevich_ir(),
+            izhikevich_step,
+            IzhikevichState(
+                voltage=torch.tensor([[29.0, -65.0]]),
+                recovery=torch.tensor([[0.0, -13.0]]),
+            ),
+            torch.tensor([[20.0, 0.0]]),
+            IzhikevichParams(),
+        ),
+    ],
+)
+def test_neuron_ir_evaluator_matches_reference_step(
+    ir, reference_step, state, input_current, params
+) -> None:
+    state_values = {field: getattr(state, field) for field in ir.state}
+    param_values = {name: getattr(params, name) for name in ir.params}
 
     next_state, outputs = evaluate_neuron(
         ir,
-        state_values={"membrane": state.membrane},
+        state_values=state_values,
         input_values={"input_current": input_current},
-        param_values={
-            "decay": params.decay,
-            "threshold": params.threshold,
-            "reset": params.reset,
-        },
+        param_values=param_values,
     )
-    expected_state, expected_spike = lif_step(state, input_current, params)
+    expected_state, expected_spike = reference_step(state, input_current, params)
 
-    assert torch.allclose(next_state["membrane"], expected_state.membrane)
+    for field in ir.state:
+        assert torch.allclose(next_state[field], getattr(expected_state, field))
     assert torch.equal(outputs["spike"], expected_spike)
 
 
@@ -135,98 +205,6 @@ def test_lif_ir_unroll_helper_matches_reference_unroll() -> None:
     assert torch.equal(spikes, expected_spikes)
 
 
-def test_alif_ir_has_expected_boundary() -> None:
-    ir = alif_ir()
-
-    assert ir.name == "alif"
-    assert ir.state == ("membrane", "adaptation")
-    assert ir.inputs == ("input_current",)
-    assert ir.params == ("decay", "adaptation_decay", "threshold", "reset", "beta")
-    assert set(ir.next_state) == {"membrane", "adaptation"}
-    assert set(ir.outputs) == {"spike"}
-
-
-def test_alif_ir_evaluator_matches_reference_step() -> None:
-    state = ALIFState(
-        membrane=torch.tensor([[0.5, 0.0]]),
-        adaptation=torch.tensor([[0.1, 0.0]]),
-    )
-    input_current = torch.tensor([[0.7, 1.1]])
-    params = ALIFParams(tau_mem=10.0, tau_adaptation=5.0, threshold=1.0, reset=0.0, beta=0.5)
-    ir = alif_ir()
-
-    next_state, outputs = evaluate_neuron(
-        ir,
-        state_values={"membrane": state.membrane, "adaptation": state.adaptation},
-        input_values={"input_current": input_current},
-        param_values={
-            "decay": params.decay,
-            "adaptation_decay": params.adaptation_decay,
-            "threshold": params.threshold,
-            "reset": params.reset,
-            "beta": params.beta,
-        },
-    )
-    expected_state, expected_spike = alif_step(state, input_current, params)
-
-    assert torch.allclose(next_state["membrane"], expected_state.membrane)
-    assert torch.allclose(next_state["adaptation"], expected_state.adaptation)
-    assert torch.equal(outputs["spike"], expected_spike)
-
-
-def test_izhikevich_ir_has_expected_boundary() -> None:
-    ir = izhikevich_ir()
-
-    assert ir.name == "izhikevich"
-    assert ir.state == ("voltage", "recovery")
-    assert ir.inputs == ("input_current",)
-    assert ir.params == (
-        "recovery_decay",
-        "recovery_coupling",
-        "reset_voltage",
-        "recovery_jump",
-        "threshold",
-        "dt",
-        "voltage_square_coeff",
-        "voltage_coeff",
-        "voltage_bias",
-    )
-    assert set(ir.next_state) == {"voltage", "recovery"}
-    assert set(ir.outputs) == {"spike"}
-
-
-def test_izhikevich_ir_evaluator_matches_reference_step() -> None:
-    state = IzhikevichState(
-        voltage=torch.tensor([[29.0, -65.0]]),
-        recovery=torch.tensor([[0.0, -13.0]]),
-    )
-    input_current = torch.tensor([[20.0, 0.0]])
-    params = IzhikevichParams()
-    ir = izhikevich_ir()
-
-    next_state, outputs = evaluate_neuron(
-        ir,
-        state_values={"voltage": state.voltage, "recovery": state.recovery},
-        input_values={"input_current": input_current},
-        param_values={
-            "recovery_decay": params.recovery_decay,
-            "recovery_coupling": params.recovery_coupling,
-            "reset_voltage": params.reset_voltage,
-            "recovery_jump": params.recovery_jump,
-            "threshold": params.threshold,
-            "dt": params.dt,
-            "voltage_square_coeff": params.voltage_square_coeff,
-            "voltage_coeff": params.voltage_coeff,
-            "voltage_bias": params.voltage_bias,
-        },
-    )
-    expected_state, expected_spike = izhikevich_step(state, input_current, params)
-
-    assert torch.allclose(next_state["voltage"], expected_state.voltage)
-    assert torch.allclose(next_state["recovery"], expected_state.recovery)
-    assert torch.equal(outputs["spike"], expected_spike)
-
-
 def test_surrogate_derivative_expr_matches_reference_derivatives() -> None:
     centered = torch.tensor([[-2.0, -0.25, 0.0, 0.5, 3.0]])
 
@@ -265,12 +243,8 @@ def test_surrogate_builder_authors_parameterized_derivative_ir() -> None:
 def test_surrogate_builder_rejects_conflicting_param_name() -> None:
     builder = SurrogateBuilder("custom")
 
-    try:
+    with pytest.raises(ValueError, match="centered"):
         builder.param("centered")
-    except ValueError as exc:
-        assert "centered" in str(exc)
-    else:
-        raise AssertionError("expected centered param conflict to fail")
 
 
 def test_neuron_builder_authors_lif_like_ir_without_manual_metadata() -> None:
@@ -416,12 +390,8 @@ def test_alif_reports_planned_generated_backward_contract() -> None:
     plan = plan_generated_backward_ir(ir, allow_unimplemented=True)
     assert plan == report.generated_backward_plan
 
-    try:
+    with pytest.raises(ValueError, match="ALIF generated backward plan is recognized"):
         plan_generated_backward_ir(ir)
-    except ValueError as exc:
-        assert "ALIF generated backward plan is recognized" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected unimplemented ALIF generated-backward error")
 
 
 def test_analyze_neuron_ir_collects_actionable_errors_without_raising() -> None:
@@ -531,193 +501,126 @@ def test_analyze_neuron_ir_reports_generated_forward_abi_errors() -> None:
         "requires exactly one output named spike",
     )
 
-    try:
+    with pytest.raises(
+        ValueError,
+        match=r"^CustomNeuronCell currently requires exactly one output named spike$",
+    ):
         validate_generated_forward_ir(extra_output, context="CustomNeuronCell")
-    except ValueError as exc:
-        assert str(exc) == ("CustomNeuronCell currently requires exactly one output named spike")
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected generated forward ABI error")
 
 
 def test_neuron_builder_rejects_undeclared_references() -> None:
     builder = NeuronBuilder("bad")
     membrane = builder.state("membrane")
 
-    try:
+    with pytest.raises(ValueError, match="undeclared input"):
         builder.build(
             next_state={"membrane": membrane + input_("undeclared_current")},
             outputs={"spike": membrane},
         )
-    except ValueError as exc:
-        assert "undeclared input" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected undeclared input error")
 
-    try:
+    with pytest.raises(ValueError, match="undeclared state"):
         builder.build(next_state={"adaptation": membrane}, outputs={"spike": membrane})
-    except ValueError as exc:
-        assert "undeclared state" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected undeclared state error")
 
 
 def test_neuron_builder_rejects_duplicate_declarations() -> None:
     builder = NeuronBuilder("bad")
     builder.state("membrane")
 
-    try:
+    with pytest.raises(ValueError, match="duplicate state"):
         builder.state("membrane")
-    except ValueError as exc:
-        assert "duplicate state" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected duplicate state error")
 
-    try:
+    with pytest.raises(ValueError, match="duplicate neuron symbol"):
         builder.param("membrane")
-    except ValueError as exc:
-        assert "duplicate neuron symbol" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected cross-kind duplicate error")
 
 
 def test_neuron_builder_rejects_names_that_codegen_cannot_render() -> None:
-    try:
+    with pytest.raises(ValueError, match="neuron name must be a valid identifier"):
         NeuronBuilder("bad-name")
-    except ValueError as exc:
-        assert "neuron name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected invalid neuron name error")
 
     builder = NeuronBuilder("bad_symbols")
-    try:
+    with pytest.raises(ValueError, match="state name must be a valid identifier"):
         builder.state("membrane-voltage")
-    except ValueError as exc:
-        assert "state name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected invalid state name error")
 
-    try:
+    with pytest.raises(ValueError, match="param name must be a valid identifier"):
         builder.param("class")
-    except ValueError as exc:
-        assert "param name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected keyword param name error")
 
 
-def test_validate_neuron_ir_rejects_direct_invalid_ir() -> None:
-    from myelin.dsl import NeuronIR, param, state
+def _make_bad_ir(
+    *,
+    name: str = "bad",
+    state: tuple[str, ...] = ("value",),
+    inputs: tuple[str, ...] = (),
+    params: tuple[str, ...] = (),
+    next_state: dict[str, Expr] | None = None,
+    outputs: dict[str, Expr] | None = None,
+):
+    from myelin.dsl import NeuronIR
 
-    invalid_name = NeuronIR(
-        name="bad-name",
-        state=("value",),
-        inputs=(),
-        params=(),
-        next_state={"value": state("value")},
-        outputs={"spike": state("value")},
+    return NeuronIR(
+        name=name,
+        state=state,
+        inputs=inputs,
+        params=params,
+        next_state=next_state if next_state is not None else {"value": _State("value")},
+        outputs=outputs if outputs is not None else {"spike": _State("value")},
     )
-    try:
-        validate_neuron_ir(invalid_name)
-    except ValueError as exc:
-        assert "neuron IR name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected invalid IR name error")
 
-    invalid_symbol = NeuronIR(
-        name="bad",
-        state=("value-with-hyphen",),
-        inputs=(),
-        params=(),
-        next_state={"value-with-hyphen": state("value-with-hyphen")},
-        outputs={"spike": state("value-with-hyphen")},
-    )
-    try:
-        validate_neuron_ir(invalid_symbol)
-    except ValueError as exc:
-        assert "state name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected invalid state symbol error")
 
-    invalid_output = NeuronIR(
-        name="bad",
-        state=("value",),
-        inputs=(),
-        params=(),
-        next_state={"value": state("value")},
-        outputs={"spike-rate": state("value")},
-    )
-    try:
-        validate_neuron_ir(invalid_output)
-    except ValueError as exc:
-        assert "output name must be a valid identifier" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected invalid output name error")
-
-    duplicate_symbol = NeuronIR(
-        name="bad",
-        state=("value",),
-        inputs=(),
-        params=("value",),
-        next_state={"value": state("value")},
-        outputs={"spike": param("value")},
-    )
-    try:
-        validate_neuron_ir(duplicate_symbol)
-    except ValueError as exc:
-        assert "duplicate neuron symbol" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected duplicate symbol error")
-
-    undeclared_reference = NeuronIR(
-        name="bad",
-        state=("membrane",),
-        inputs=(),
-        params=(),
-        next_state={"membrane": input_("current")},
-        outputs={"spike": state("membrane")},
-    )
-    try:
-        evaluate_neuron(
-            undeclared_reference,
-            state_values={"membrane": torch.zeros((1, 2))},
-            input_values={},
-            param_values={},
-        )
-    except ValueError as exc:
-        assert "undeclared input" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected undeclared input error")
-
-    missing_state_update = NeuronIR(
-        name="bad",
-        state=("membrane", "adaptation"),
-        inputs=(),
-        params=(),
-        next_state={"membrane": state("membrane")},
-        outputs={"spike": state("membrane")},
-    )
-    try:
-        validate_neuron_ir(missing_state_update)
-    except ValueError as exc:
-        assert "missing state updates" in str(exc)
-        assert "adaptation" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected missing state update error")
+@pytest.mark.parametrize(
+    "override, expected_match",
+    [
+        (
+            {"name": "bad-name"},
+            "neuron IR name must be a valid identifier",
+        ),
+        (
+            {
+                "state": ("value-with-hyphen",),
+                "next_state": {"value-with-hyphen": _State("value-with-hyphen")},
+                "outputs": {"spike": _State("value-with-hyphen")},
+            },
+            "state name must be a valid identifier",
+        ),
+        (
+            {"outputs": {"spike-rate": _State("value")}},
+            "output name must be a valid identifier",
+        ),
+        (
+            {
+                "params": ("value",),
+                "outputs": {"spike": _Param("value")},
+            },
+            "duplicate neuron symbol",
+        ),
+        (
+            {
+                "state": ("membrane",),
+                "next_state": {"membrane": input_("current")},
+                "outputs": {"spike": _State("membrane")},
+            },
+            "undeclared input",
+        ),
+        (
+            {
+                "state": ("membrane", "adaptation"),
+                "next_state": {"membrane": _State("membrane")},
+                "outputs": {"spike": _State("membrane")},
+            },
+            "missing state updates.*adaptation",
+        ),
+    ],
+)
+def test_validate_neuron_ir_rejects_direct_invalid_ir(override, expected_match) -> None:
+    with pytest.raises(ValueError, match=expected_match):
+        validate_neuron_ir(_make_bad_ir(**override))
 
 
 def test_validate_expr_rejects_malformed_direct_exprs() -> None:
-    try:
+    with pytest.raises(ValueError, match="expects 2 args"):
         validate_expr(Expr("add", args=(input_("x"),)))
-    except ValueError as exc:
-        assert "expects 2 args" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected arity error")
 
-    try:
+    with pytest.raises(ValueError, match="must not define name or args"):
         validate_expr(Expr("const", value=1.0, args=(input_("x"),)))
-    except ValueError as exc:
-        assert "must not define name or args" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected malformed const error")
 
 
 def test_evaluate_neuron_unroll_rejects_invalid_boundary() -> None:
@@ -725,31 +628,19 @@ def test_evaluate_neuron_unroll_rejects_invalid_boundary() -> None:
     ir = lif_ir()
     params = {"decay": 0.9, "threshold": 1.0, "reset": 0.0}
 
-    try:
+    with pytest.raises(ValueError, match="inputs must be shaped"):
         evaluate_neuron_unroll(ir, inputs[:, :, 0], {"membrane": torch.zeros((2, 4))}, params)
-    except ValueError as exc:
-        assert "inputs must be shaped" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected input shape error")
 
-    try:
+    with pytest.raises(ValueError, match="must match inputs.shape"):
         evaluate_neuron_unroll(ir, inputs, {"membrane": torch.zeros((2, 3))}, params)
-    except ValueError as exc:
-        assert "must match inputs.shape" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected state shape error")
 
-    try:
+    with pytest.raises(ValueError, match="missing values"):
         evaluate_neuron_unroll(
             ir,
             inputs,
             {"membrane": torch.zeros((2, 4))},
             {"decay": 0.9, "threshold": 1.0},
         )
-    except ValueError as exc:
-        assert "missing values" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
-        raise AssertionError("expected missing params error")
 
 
 def test_validate_neuron_ir_rejects_malformed_expression_before_evaluation() -> None:

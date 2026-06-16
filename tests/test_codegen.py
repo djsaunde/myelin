@@ -149,52 +149,47 @@ def test_alif_ir_lowers_with_two_state_outputs_and_shared_spike() -> None:
     assert "torch.where" in "\n".join(expressions)
 
 
-def test_surrogate_derivative_expr_renders_python_and_triton() -> None:
-    triangular_ir = NeuronIR(
+@pytest.mark.parametrize(
+    ("surrogate_name", "expected_python_substrs", "expected_triton_substrs"),
+    [
+        (
+            "triangular",
+            ("torch.abs(centered)", "torch.sign(centered)", "out_derivative"),
+            ("tl.abs(centered)", "tl.where(centered > 0.0"),
+        ),
+        (
+            "sigmoid",
+            ("torch.sigmoid(centered)",),
+            ("tl.sigmoid(centered)",),
+        ),
+        (
+            "multi_gaussian",
+            ("torch.exp(",),
+            ("tl.exp(",),
+        ),
+    ],
+)
+def test_surrogate_derivative_expr_renders_python_and_triton(
+    surrogate_name: str,
+    expected_python_substrs: tuple[str, ...],
+    expected_triton_substrs: tuple[str, ...],
+) -> None:
+    ir = NeuronIR(
         name="surrogate",
         state=(),
         params=(),
         inputs=("centered",),
         next_state={},
-        outputs={"derivative": surrogate_derivative_expr("triangular", input_("centered"))},
-    )
-    sigmoid_ir = NeuronIR(
-        name="surrogate",
-        state=(),
-        params=(),
-        inputs=("centered",),
-        next_state={},
-        outputs={"derivative": surrogate_derivative_expr("sigmoid", input_("centered"))},
-    )
-    multi_gaussian_ir = NeuronIR(
-        name="surrogate",
-        state=(),
-        params=(),
-        inputs=("centered",),
-        next_state={},
-        outputs={"derivative": surrogate_derivative_expr("multi_gaussian", input_("centered"))},
+        outputs={"derivative": surrogate_derivative_expr(surrogate_name, input_("centered"))},
     )
 
-    python_rendered = render_lowered_neuron(lower_neuron_to_ssa(triangular_ir))
-    triton_rendered = render_lowered_neuron(lower_neuron_to_ssa(triangular_ir, dialect="triton"))
-    sigmoid_python_rendered = render_lowered_neuron(lower_neuron_to_ssa(sigmoid_ir))
-    sigmoid_triton_rendered = render_lowered_neuron(
-        lower_neuron_to_ssa(sigmoid_ir, dialect="triton")
-    )
-    multi_gaussian_python_rendered = render_lowered_neuron(lower_neuron_to_ssa(multi_gaussian_ir))
-    multi_gaussian_triton_rendered = render_lowered_neuron(
-        lower_neuron_to_ssa(multi_gaussian_ir, dialect="triton")
-    )
+    python_rendered = render_lowered_neuron(lower_neuron_to_ssa(ir))
+    triton_rendered = render_lowered_neuron(lower_neuron_to_ssa(ir, dialect="triton"))
 
-    assert "torch.abs(centered)" in python_rendered
-    assert "tl.abs(centered)" in triton_rendered
-    assert "torch.sign(centered)" in python_rendered
-    assert "tl.where(centered > 0.0" in triton_rendered
-    assert "torch.sigmoid(centered)" in sigmoid_python_rendered
-    assert "tl.sigmoid(centered)" in sigmoid_triton_rendered
-    assert "torch.exp(" in multi_gaussian_python_rendered
-    assert "tl.exp(" in multi_gaussian_triton_rendered
-    assert "out_derivative" in python_rendered
+    for substr in expected_python_substrs:
+        assert substr in python_rendered
+    for substr in expected_triton_substrs:
+        assert substr in triton_rendered
 
 
 def test_surrogate_derivative_body_executes_like_reference_derivative() -> None:

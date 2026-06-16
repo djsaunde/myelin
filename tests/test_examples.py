@@ -7,17 +7,28 @@ from pathlib import Path
 
 import pytest
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+
+
+def _run_example(
+    script: str, args: list[str], *, timeout: float | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(EXAMPLES_DIR / script), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
 
 def test_examples_compile() -> None:
-    examples_dir = Path(__file__).resolve().parents[1] / "examples"
-
-    for path in sorted(examples_dir.glob("*.py")):
+    for path in sorted(EXAMPLES_DIR.glob("*.py")):
         py_compile.compile(str(path), doraise=True)
 
 
 def test_compile_policy_resolves_cpu_modes() -> None:
-    examples_dir = Path(__file__).resolve().parents[1] / "examples"
-    sys.path.insert(0, str(examples_dir))
+    sys.path.insert(0, str(EXAMPLES_DIR))
     try:
         from example_utils import resolve_compile_policy
     finally:
@@ -30,14 +41,7 @@ def test_compile_policy_resolves_cpu_modes() -> None:
 
 @pytest.mark.extended
 def test_mnist_rate_help_describes_backend_recommendation() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "train_mnist_rate.py"
-
-    result = subprocess.run(
-        [sys.executable, str(example), "--help"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_example("train_mnist_rate.py", ["--help"])
 
     normalized_stdout = " ".join(result.stdout.split())
     assert "auto resolves to triton on CUDA" in normalized_stdout
@@ -46,9 +50,8 @@ def test_mnist_rate_help_describes_backend_recommendation() -> None:
 
 
 @pytest.mark.extended
-def test_mnist_rate_ddp_example_runs_on_cpu() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "train_mnist_rate_ddp.py"
-
+@pytest.mark.parametrize("script", ["train_mnist_rate_ddp.py", "train_mnist_rate_fsdp2.py"])
+def test_mnist_rate_distributed_example_runs_on_cpu(script: str) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -57,58 +60,7 @@ def test_mnist_rate_ddp_example_runs_on_cpu() -> None:
             "--standalone",
             "--nproc-per-node",
             "2",
-            str(example),
-            "--device",
-            "cpu",
-            "--compile",
-            "off",
-            "--backend",
-            "torch",
-            "--timesteps",
-            "4",
-            "--batch",
-            "4",
-            "--hidden",
-            "8",
-            "--epochs",
-            "1",
-            "--train-limit",
-            "16",
-            "--test-limit",
-            "16",
-            "--eval-batches",
-            "1",
-            "--log-every",
-            "1",
-            "--eval-every",
-            "2",
-            "--num-workers",
-            "0",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-    assert "world_size:2" in result.stdout
-    assert "final_test_loss=" in result.stdout
-    assert "final_test_accuracy=" in result.stdout
-
-
-@pytest.mark.extended
-def test_mnist_rate_fsdp2_example_runs_on_cpu() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "train_mnist_rate_fsdp2.py"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            "--nproc-per-node",
-            "2",
-            str(example),
+            str(EXAMPLES_DIR / script),
             "--device",
             "cpu",
             "--compile",
@@ -149,13 +101,10 @@ def test_mnist_rate_fsdp2_example_runs_on_cpu() -> None:
 
 @pytest.mark.extended
 def test_custom_neuron_dsl_example_runs_on_cpu() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "custom_neuron_dsl.py"
-
     for variant in ("lif", "alif", "refractory_lif"):
-        result = subprocess.run(
+        result = _run_example(
+            "custom_neuron_dsl.py",
             [
-                sys.executable,
-                str(example),
                 "--device",
                 "cpu",
                 "--variant",
@@ -167,9 +116,6 @@ def test_custom_neuron_dsl_example_runs_on_cpu() -> None:
                 "--neurons",
                 "4",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
         )
 
         assert f"| variant | {variant} |" in result.stdout
@@ -181,12 +127,9 @@ def test_custom_neuron_dsl_example_runs_on_cpu() -> None:
 
 @pytest.mark.extended
 def test_custom_surrogate_online_example_runs_on_cpu() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "custom_surrogate_online.py"
-
-    result = subprocess.run(
+    result = _run_example(
+        "custom_surrogate_online.py",
         [
-            sys.executable,
-            str(example),
             "--device",
             "cpu",
             "--timesteps",
@@ -200,9 +143,6 @@ def test_custom_surrogate_online_example_runs_on_cpu() -> None:
             "--width",
             "1.5",
         ],
-        check=True,
-        capture_output=True,
-        text=True,
     )
 
     assert "| surrogate_params.width | 1.500000 |" in result.stdout
@@ -212,12 +152,9 @@ def test_custom_surrogate_online_example_runs_on_cpu() -> None:
 
 @pytest.mark.extended
 def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "train_custom_lif_rate.py"
-
-    result = subprocess.run(
+    result = _run_example(
+        "train_custom_lif_rate.py",
         [
-            sys.executable,
-            str(example),
             "--device",
             "cpu",
             "--timesteps",
@@ -239,9 +176,6 @@ def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
             "--lr",
             "1.0",
         ],
-        check=True,
-        capture_output=True,
-        text=True,
     )
 
     assert "LinearCustomSurrogateNeuronRate" not in result.stderr
@@ -251,13 +185,33 @@ def test_custom_lif_rate_training_example_runs_on_cpu() -> None:
 
 
 @pytest.mark.extended
-def test_export_hardware_bundle_example_runs(tmp_path: Path) -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
-
-    result = subprocess.run(
+@pytest.mark.parametrize(
+    ("adapter_args", "expected_substrs", "expected_file"),
+    [
+        (
+            [],
+            ["| manifest |", "| placement_cores | 4 |"],
+            None,
+        ),
+        (
+            ["--adapter", "spinnaker2"],
+            [
+                "| spinnaker2_adapter_manifest |",
+                "myelin.spinnaker2_dense_lif_manifest.v0",
+            ],
+            "unit.spinnaker2_manifest.json",
+        ),
+    ],
+)
+def test_export_hardware_bundle_example_runs(
+    tmp_path: Path,
+    adapter_args: list[str],
+    expected_substrs: list[str],
+    expected_file: str | None,
+) -> None:
+    result = _run_example(
+        "export_hardware_bundle.py",
         [
-            sys.executable,
-            str(example),
             "--output-dir",
             str(tmp_path),
             "--prefix",
@@ -270,48 +224,15 @@ def test_export_hardware_bundle_example_runs(tmp_path: Path) -> None:
             "2",
             "--max-outputs-per-core",
             "3",
+            *adapter_args,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
     )
 
-    assert "| manifest |" in result.stdout
-    assert "| placement_cores | 4 |" in result.stdout
+    for substr in expected_substrs:
+        assert substr in result.stdout
     assert (tmp_path / "unit.hardware_bundle.json").exists()
     assert (tmp_path / "unit.dense_lif.json").exists()
     assert (tmp_path / "unit.dense_lif_quantized.json").exists()
     assert (tmp_path / "unit.dense_lif_placement.json").exists()
-
-
-@pytest.mark.extended
-def test_export_hardware_bundle_example_writes_spinnaker_adapter(tmp_path: Path) -> None:
-    example = Path(__file__).resolve().parents[1] / "examples" / "export_hardware_bundle.py"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(example),
-            "--output-dir",
-            str(tmp_path),
-            "--prefix",
-            "unit",
-            "--in-features",
-            "3",
-            "--out-features",
-            "5",
-            "--max-inputs-per-core",
-            "2",
-            "--max-outputs-per-core",
-            "3",
-            "--adapter",
-            "spinnaker2",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert "| spinnaker2_adapter_manifest |" in result.stdout
-    assert "myelin.spinnaker2_dense_lif_manifest.v0" in result.stdout
-    assert (tmp_path / "unit.spinnaker2_manifest.json").exists()
+    if expected_file is not None:
+        assert (tmp_path / expected_file).exists()
