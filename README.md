@@ -76,7 +76,8 @@ them through the surrogate LIF backend (`examples/custom_neuron_dsl.py`).
 ## Examples and benchmarks
 
 Runnable training examples live in `examples/` (`train_mnist_rate.py`,
-`train_mnist_conv.py`, `train_custom_lif_rate.py`, `export_hardware_bundle.py`);
-benchmark results live in `benchmarks/results/`. Regenerate the canonical CUDA
-set with `python -m myelin.benchmarks.performance_frontier --device cuda` and
-`python -m myelin.benchmarks.runner --preset core --require-cuda`.
+`train_mnist_conv.py`, `train_custom_lif_rate.py`, `export_hardware_bundle.py`).
+The benchmark suite lives in `myelin.benchmarks`; generate the canonical CUDA set
+locally with `python -m myelin.benchmarks.performance_frontier --device cuda` and
+`python -m myelin.benchmarks.runner --preset core --require-cuda`, which write
+results into `benchmarks/results/`.

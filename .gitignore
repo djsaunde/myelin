@@ -17,8 +17,8 @@ wheels/
 torch_compile_debug/
 wandb/
 
-# Generated benchmark/debug artifacts
-benchmarks/compile_debug/
+# Local-only benchmark artifacts and results
+benchmarks/
 
 # Local training/inference run outputs
 runs/
