@@ -799,7 +799,8 @@ def test_checkpoint_size_sweep_rate_pareto_frontier() -> None:
 
 
 def test_benchmark_runner_resolves_artifact_paths(tmp_path) -> None:
-    specs = PRESETS["smoke"][:2]
+    by_name = {spec.name: spec for spec in PRESETS["smoke"]}
+    specs = (by_name["generated_forward"], by_name["packed_forward"])
     runs = make_runs(
         specs,
         device="cuda",
